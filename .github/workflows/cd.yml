@@ -1,0 +1,82 @@
+name: CD Metradingplat Signal Processing Service
+
+on:
+  workflow_run:
+    workflows: ["CI Metradingplat Signal Processing Service"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Create Docker Network
+        run: |
+          docker network create metradingplat-network || echo "Network already exists"
+
+      - name: Infrastructure Diagnosis & Cleanup
+        run: |
+          echo "--- DISK SPACE CHECK ---"
+          df -h
+          echo "--- CLEANING SHARED BASE IMAGES ---"
+          docker image rm -f python:3.11-slim python:3.11-alpine || true
+          echo "--- CLEANING SERVICE METADATA ---"
+          docker rm -f signal-processing-service || true
+          docker image rm -f virtud142/metradingplat_signal_processing_service:latest || true
+
+      - name: Pull Application Image (with Retry Logic)
+        run: |
+          echo "Attempting to pull image with auto-retry for stability..."
+          for i in 1 2 3; do
+            docker pull virtud142/metradingplat_signal_processing_service:latest && exit 0 || \
+            (echo "Attempt $i failed, waiting 10s..." && sleep 10)
+          done
+          echo "All pull attempts failed. Docker daemon might need a manual restart."
+          exit 1
+
+      - name: Delete Old Application Container
+        run: docker rm -f signal-processing-service || true
+
+      - name: Run Application Container
+        run: |
+          docker run -d \
+            -p 8000:8000 \
+            --name "signal-processing-service" \
+            --network "metradingplat-network" \
+            --restart "unless-stopped" \
+            --label project="metradingplat" \
+            --label service="signal-processing-service" \
+            -e SCANNER_SERVICE_URL="http://gateway:8080/api" \
+            -e MARKETDATA_SERVICE_URL="http://gateway:8080/api" \
+            -e MAX_WORKERS_SIMBOLOS="20" \
+            -e MAX_SYMBOLS_REALTIME="50" \
+            -e EVENT_POLLING_INTERVAL_SECONDS="0.1" \
+            virtud142/metradingplat_signal_processing_service:latest
+
+      - name: Clean Old Images of This Service
+        run: |
+          echo "Cleaning old images for signal-processing-service..."
+          CURRENT_IMAGE=$(docker inspect signal-processing-service --format='{{.Image}}' 2>/dev/null || echo "")
+          if [ -n "$CURRENT_IMAGE" ]; then
+            docker images --filter "label=service=signal-processing-service" --format "{{.ID}}" | while read img; do
+              if [ "$img" != "${CURRENT_IMAGE:7:12}" ]; then
+                echo "Removing old image: $img"
+                docker rmi -f $img 2>/dev/null || true
+              fi
+            done
+          fi
+          docker images virtud142/metradingplat_signal_processing_service --format "{{.ID}} {{.Tag}}" | grep -v "latest" | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
+
+      - name: Clean Stopped Containers of This Service
+        run: |
+          echo "Cleaning stopped containers for signal-processing-service..."
+          docker ps -a --filter "label=service=signal-processing-service" --filter "status=exited" -q | xargs -r docker rm 2>/dev/null || true
+
+      - name: Final Status Check
+        run: |
+          sleep 10
+          docker ps | grep signal-processing-service
+          echo "--- Container Logs (last 20 lines) ---"
+          docker logs --tail 20 signal-processing-service

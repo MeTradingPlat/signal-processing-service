@@ -48,6 +48,7 @@ jobs:
             --restart "unless-stopped" \
             --label project="metradingplat" \
             --label service="signal-processing-service" \
+            -e KAFKA_BOOTSTRAP_SERVERS="kafka:29092" \
             -e SCANNER_SERVICE_URL="http://gateway:8080/api" \
             -e MARKETDATA_SERVICE_URL="http://gateway:8080/api" \
             -e MAX_WORKERS_SIMBOLOS="20" \

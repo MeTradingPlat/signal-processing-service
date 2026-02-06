@@ -22,8 +22,9 @@ COPY requirements.txt .
 ENV NPY_DISABLE_SVML=1
 ENV OPENBLAS_NUM_THREADS=1
 
-# Instalar numpy primero desde source (sin wheels pre-compilados con AVX)
-RUN pip install --no-cache-dir --no-binary numpy numpy
+# Instalar numpy y pandas desde source (sin wheels pre-compilados con AVX)
+# Esto es NECESARIO para CPUs sin AVX como AMD E-350
+RUN pip install --no-cache-dir --no-binary numpy,pandas numpy pandas
 
 # Instalar el resto de dependencias
 RUN pip install --no-cache-dir -r requirements.txt

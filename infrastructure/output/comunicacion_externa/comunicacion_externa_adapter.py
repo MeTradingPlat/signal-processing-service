@@ -6,6 +6,7 @@ Combina llamadas a market-data-service (Java) y Yahoo Finance (yahooquery).
 """
 
 import logging
+import sys
 
 import requests
 
@@ -33,9 +34,22 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         scanner_adapter: ScannerManagementAdapter | None = None,
         market_adapter: MarketDataAdapter | None = None,
     ):
+        logger.info("Inicializando ComunicacionExternaAdapter...")
+        logger.info(f"  -> SCANNER_SERVICE_URL: {SCANNER_SERVICE_URL}")
+        logger.info(f"  -> MARKETDATA_SERVICE_URL: {MARKETDATA_SERVICE_URL}")
+        sys.stdout.flush()
+
         self._yahoo = yahoo_adapter or YahooFinanceAdapter()
+        logger.info("  -> YahooFinanceAdapter OK")
+
         self._scanner_management = scanner_adapter or ScannerManagementAdapter()
+        logger.info("  -> ScannerManagementAdapter OK")
+
         self._market_data = market_adapter or MarketDataAdapter()
+        logger.info("  -> MarketDataAdapter OK")
+
+        logger.info("ComunicacionExternaAdapter inicializado correctamente")
+        sys.stdout.flush()
 
     # =========================================================================
     # Scanner Management Service
@@ -43,13 +57,20 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
 
     def obtener_escaneres_activos(self) -> list[Escaner]:
         """GET /api/escaner -> filtra los que tienen estado INICIADO."""
+        logger.info("Obteniendo escaneres activos desde scanner-management-service...")
+        sys.stdout.flush()
         try:
             data = self._scanner_management.obtener_escaneres_activos()
-            # Ya el endpoint retorna solo iniciados, pero mantenemos filtrado por seguridad o mapeo
+            logger.info(f"Respuesta del scanner-management-service: {len(data)} escaneres")
             escaneres = [self._mapear_escaner(item) for item in data]
+            logger.info(f"Escaneres mapeados exitosamente: {len(escaneres)}")
+            for esc in escaneres:
+                logger.debug(f"  - Escaner: {esc.nombre} (ID: {esc.id_escaner})")
+            sys.stdout.flush()
             return escaneres
         except Exception as e:
-            logger.error(f"Error obteniendo escaneres activos: {e}")
+            logger.error(f"Error obteniendo escaneres activos: {e}", exc_info=True)
+            sys.stdout.flush()
             return []
 
     # =========================================================================
@@ -59,10 +80,13 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
     def obtener_mercados_disponibles(self) -> list[dict]:
         """GET /api/marketdata/markets"""
         url = f"{MARKETDATA_SERVICE_URL}/marketdata/markets"
+        logger.debug(f"Obteniendo mercados disponibles desde {url}")
         try:
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return response.json()
+            mercados = response.json()
+            logger.debug(f"Mercados obtenidos: {len(mercados)}")
+            return mercados
         except requests.RequestException as e:
             logger.error(f"Error obteniendo mercados desde {url}: {e}")
             return []
@@ -70,10 +94,13 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
     def obtener_simbolos_por_mercado(self, enum_mercado: str) -> list[str]:
         """GET /api/marketdata/symbols?markets={enum_mercado}"""
         url = f"{MARKETDATA_SERVICE_URL}/marketdata/symbols"
+        logger.debug(f"Obteniendo simbolos para mercado {enum_mercado}...")
         try:
             response = requests.get(url, params={"markets": enum_mercado}, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return response.json()
+            simbolos = response.json()
+            logger.info(f"Simbolos obtenidos para {enum_mercado}: {len(simbolos)}")
+            return simbolos
         except requests.RequestException as e:
             logger.warning(f"No se pudo obtener simbolos para mercado {enum_mercado}: {e}")
             return []
@@ -86,25 +113,10 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         self, symbol: str, timeframe: str, from_date: str, to_date: str
     ) -> list[Candle]:
         """GET /api/marketdata/historical/{symbol}?timeframe=..."""
-        # El adaptador nuevo usa "bars" o "end_date".
-        # Si la interfaz requiere from/to, tendriamos que calcular bars o usar adaptador que soporte fechas.
-        # MarketDataAdapter soporta 'end_date'. 'start_date' no esta.
-        # Asumiremos obtener ULTIMAS N velas o hasta 'to_date'.
-        # Ojo: la firma de este metodo es fija por el puerto.
-        # El MarketDataService tiene 'bars' y 'endDate'.
-        # Por ahora usaremos 'bars' fijo o intentaremos adaptar.
-        
-        # Para simplificar y cumplir con "usar lo que retorna marketdata",
-        # llamamos con un numero de bares suficiente si no podemos filtrar rango exacto
-        # o usamos el MarketDataAdapter tal cual si lo modificamos.
-        
-        # Como MarketDataAdapter expone obtener_velas_historicas(symbol, timeframe, bars, end_date)
-        # Adaptaremos lo mejor posible.
-        
+        logger.debug(f"Obteniendo candles para {symbol} tf={timeframe}...")
         try:
-            # TODO: Calcular bars en base a from/to o pedir suficientes.
             data = self._market_data.obtener_velas_historicas(symbol, timeframe, bars=500, end_date=to_date)
-            
+
             candles = [
                 Candle(
                     symbol=item.get("symbol", symbol),
@@ -117,6 +129,7 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
                 )
                 for item in data
             ]
+            logger.debug(f"Candles obtenidos para {symbol}: {len(candles)}")
             return candles
 
         except Exception as e:
@@ -171,10 +184,8 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         - Yahoo Finance: float, shares outstanding, short interest, short ratio
         - Market Data Service: earnings (days_until_earnings), quote (market cap calc)
         """
-        # Yahoo Finance data
         datos = self._yahoo.obtener_datos_fundamentales(symbol)
 
-        # Enriquecer con earnings desde market-data-service
         try:
             url = f"{MARKETDATA_SERVICE_URL}/marketdata/earnings/{symbol}"
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -184,7 +195,6 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         except requests.RequestException:
             logger.debug(f"No earnings data for {symbol}")
 
-        # Calcular market cap si tenemos quote y shares outstanding
         if datos.shares_outstanding > 0:
             quote = self.obtener_quote(symbol)
             last_price = float(quote.get("last", 0))
@@ -211,10 +221,13 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
             "stopLossPrice": stop_loss_price,
             "takeProfitPrice": take_profit_price,
         }
+        logger.info(f"Enviando orden bracket para {symbol}: {payload}")
         try:
             response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            logger.info(f"Orden bracket enviada exitosamente: {result}")
+            return result
         except requests.RequestException as e:
             logger.error(f"Error enviando orden bracket para {symbol}: {e}")
             return {"error": str(e)}
@@ -222,10 +235,11 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
     def cancelar_orden(self, order_id: str) -> None:
         """DELETE /api/marketdata/orders/{orderId}"""
         url = f"{MARKETDATA_SERVICE_URL}/marketdata/orders/{order_id}"
+        logger.info(f"Cancelando orden {order_id}...")
         try:
             response = requests.delete(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            logger.info(f"Orden {order_id} cancelada")
+            logger.info(f"Orden {order_id} cancelada exitosamente")
         except requests.RequestException as e:
             logger.error(f"Error cancelando orden {order_id}: {e}")
 

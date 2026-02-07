@@ -17,28 +17,33 @@ def set_use_case(use_case):
 
 @app.post("/api/signal-processing/escaner")
 async def registrar_escaner(escaner: Dict[str, Any]):
+    logger.info(f"[API] POST /api/signal-processing/escaner - Solicitud recibida")
+    logger.info(f"[API] Datos escaner: id={escaner.get('idEscaner')}, nombre={escaner.get('nombre')}")
+
     if _use_case is None:
+        logger.error("[API] Service not fully initialized - use_case is None")
         raise HTTPException(status_code=503, detail="Service not fully initialized")
-    
+
     try:
-        logger.info(f"Recibida notificacion de nuevo escaner: {escaner.get('idEscaner')}")
-        # The use case expects the dictionary representation directly or an object?
-        # Assuming it handles the dict or we adapt it.
         _use_case.registrar_escaner(escaner)
+        logger.info(f"[API] POST /api/signal-processing/escaner - Respuesta OK: id={escaner.get('idEscaner')}")
         return {"status": "ok", "message": "Escaner registrado"}
     except Exception as e:
-        logger.error(f"Error registrando escaner: {e}", exc_info=True)
+        logger.error(f"[API] POST /api/signal-processing/escaner - ERROR: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/signal-processing/escaner/{id}/detener")
 async def detener_escaner(id: int):
+    logger.info(f"[API] POST /api/signal-processing/escaner/{id}/detener - Solicitud recibida")
+
     if _use_case is None:
+        logger.error("[API] Service not fully initialized - use_case is None")
         raise HTTPException(status_code=503, detail="Service not fully initialized")
-    
+
     try:
-        logger.info(f"Recibida notificacion de detener escaner: {id}")
         _use_case.detener_escaner(id)
+        logger.info(f"[API] POST /api/signal-processing/escaner/{id}/detener - Respuesta OK")
         return {"status": "ok", "message": "Escaner detenido"}
     except Exception as e:
-        logger.error(f"Error deteniendo escaner: {e}", exc_info=True)
+        logger.error(f"[API] POST /api/signal-processing/escaner/{id}/detener - ERROR: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

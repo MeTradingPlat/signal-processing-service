@@ -273,14 +273,40 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
             id_escaner=data.get("idEscaner", 0),
             nombre=data.get("nombre", ""),
             descripcion=data.get("descripcion", ""),
-            hora_inicio=data.get("horaInicio", ""),
-            hora_fin=data.get("horaFin", ""),
-            fecha_creacion=data.get("fechaCreacion", ""),
+            hora_inicio=self._parse_time_value(data.get("horaInicio", "")),
+            hora_fin=self._parse_time_value(data.get("horaFin", "")),
+            fecha_creacion=self._parse_date_value(data.get("fechaCreacion", "")),
             obj_estado=estado,
             obj_tipo_ejecucion=tipo_ejecucion,
             mercados=mercados,
             filtros=filtros,
         )
+
+    def _parse_time_value(self, value) -> str:
+        """Convierte un valor de tiempo (lista o string) a formato string HH:MM:SS."""
+        if isinstance(value, list):
+            # Java LocalTime serializado como [hour, minute, second] o [hour, minute]
+            hour = value[0] if len(value) > 0 else 0
+            minute = value[1] if len(value) > 1 else 0
+            second = value[2] if len(value) > 2 else 0
+            return f"{hour:02d}:{minute:02d}:{second:02d}"
+        elif isinstance(value, str):
+            return value
+        else:
+            return ""
+
+    def _parse_date_value(self, value) -> str:
+        """Convierte un valor de fecha (lista o string) a formato string YYYY-MM-DD."""
+        if isinstance(value, list):
+            # Java LocalDate serializado como [year, month, day]
+            year = value[0] if len(value) > 0 else 1970
+            month = value[1] if len(value) > 1 else 1
+            day = value[2] if len(value) > 2 else 1
+            return f"{year:04d}-{month:02d}-{day:02d}"
+        elif isinstance(value, str):
+            return value
+        else:
+            return ""
 
     def _mapear_filtro(self, data: dict) -> Filtro:
         obj_categoria = data.get("objCategoria") or {}

@@ -245,7 +245,7 @@ def main():
         else:
             logger.info(f"Escaneres activos obtenidos: {len(escaneres_activos)}")
             for esc in escaneres_activos:
-                logger.info(f"  - Escaner: {esc.get('nombre', esc.get('id', 'unknown'))}")
+                logger.info(f"  - Escaner: {esc.nombre} (ID: {esc.id_escaner})")
         sys.stdout.flush()
 
         logger.info("PASO 11: Programando escaneres en scheduler...")

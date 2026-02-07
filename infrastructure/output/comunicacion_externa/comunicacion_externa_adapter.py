@@ -250,13 +250,15 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
     # =========================================================================
 
     def _mapear_escaner(self, data: dict) -> Escaner:
+        obj_estado = data.get("objEstado") or {}
         estado = EstadoEscaner(
-            enum_estado_escaner=data.get("objEstado", {}).get("enumEstadoEscaner", ""),
-            fecha_registro=data.get("objEstado", {}).get("fechaRegistro", ""),
+            enum_estado_escaner=obj_estado.get("enumEstadoEscaner", ""),
+            fecha_registro=obj_estado.get("fechaRegistro", ""),
         )
+        obj_tipo_ejecucion = data.get("objTipoEjecucion") or {}
         tipo_ejecucion = TipoEjecucion(
-            etiqueta=data.get("objTipoEjecucion", {}).get("etiqueta", ""),
-            enum_tipo_ejecucion=data.get("objTipoEjecucion", {}).get("enumTipoEjecucion", ""),
+            etiqueta=obj_tipo_ejecucion.get("etiqueta", ""),
+            enum_tipo_ejecucion=obj_tipo_ejecucion.get("enumTipoEjecucion", ""),
         )
         mercados = [
             Mercado(
@@ -281,9 +283,10 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         )
 
     def _mapear_filtro(self, data: dict) -> Filtro:
+        obj_categoria = data.get("objCategoria") or {}
         categoria = CategoriaFiltro(
-            enum_categoria_filtro=data.get("objCategoria", {}).get("enumCategoriaFiltro", ""),
-            etiqueta=data.get("objCategoria", {}).get("etiqueta", ""),
+            enum_categoria_filtro=obj_categoria.get("enumCategoriaFiltro", ""),
+            etiqueta=obj_categoria.get("etiqueta", ""),
         )
         parametros = [self._mapear_parametro(p) for p in data.get("parametros", [])]
 
@@ -296,7 +299,7 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         )
 
     def _mapear_parametro(self, data: dict) -> Parametro:
-        valor_data = data.get("objValorSeleccionado", {})
+        valor_data = data.get("objValorSeleccionado") or {}
         valor = self._mapear_valor(valor_data)
 
         opciones_data = data.get("opciones", [])

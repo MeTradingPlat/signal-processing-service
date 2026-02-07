@@ -16,6 +16,7 @@ class KafkaProducerAdapter(KafkaProducerIntPort):
     TOPIC_SIGNALS = "signals"
     TOPIC_ASSET_STATE = "asset-state"
     TOPIC_LOGS = "logs"
+    TOPIC_SCANNER_STATE = "scanner.state"
 
     def __init__(self, bootstrap_servers: str):
         self._producer = Producer({
@@ -51,6 +52,10 @@ class KafkaProducerAdapter(KafkaProducerIntPort):
 
     def publicar_log(self, mensaje: dict) -> None:
         self._enviar(self.TOPIC_LOGS, mensaje)
+
+    def publicar_escaner_completado(self, mensaje: dict) -> None:
+        self._enviar(self.TOPIC_SCANNER_STATE, mensaje)
+        logger.info(f"Evento escaner completado publicado: escaner_id={mensaje.get('idEscaner')}")
 
     def flush(self) -> None:
         """Fuerza el envio de mensajes pendientes."""

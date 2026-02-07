@@ -19,3 +19,8 @@ class KafkaProducerIntPort(ABC):
     def publicar_log(self, mensaje: dict) -> None:
         """Publica un log al topic 'logs'."""
         pass
+
+    @abstractmethod
+    def publicar_escaner_completado(self, mensaje: dict) -> None:
+        """Publica evento de escaner completado al topic 'scanner.state'."""
+        pass

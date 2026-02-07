@@ -21,10 +21,11 @@ COPY requirements.txt .
 # Esto es necesario para CPUs antiguos como AMD E-350
 ENV NPY_DISABLE_SVML=1
 ENV OPENBLAS_NUM_THREADS=1
+ENV NPY_DISABLE_CPU_FEATURES="AVX AVX2 AVX512F"
 
-# Instalar numpy y pandas desde source (sin wheels pre-compilados con AVX)
-# Esto es NECESARIO para CPUs sin AVX como AMD E-350
-RUN pip install --no-cache-dir --no-binary numpy,pandas numpy pandas
+# Usar versiones compatibles con CPUs sin AVX (numpy<2, pandas<3)
+# Las versiones 2.x/3.x requieren AVX incluso compilando desde source
+RUN pip install --no-cache-dir "numpy<2" "pandas<3"
 
 # Instalar el resto de dependencias
 RUN pip install --no-cache-dir -r requirements.txt

@@ -113,6 +113,9 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         simbolos = self._obtener_simbolos(escaner)
         if not simbolos:
             logger.warning(f"Escaner {escaner.nombre}: no se obtuvieron simbolos.")
+            # Si es tipo UNA_VEZ, notificar que termino (aunque sin simbolos)
+            if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
+                self._notificar_escaner_completado(escaner, "SIN_SIMBOLOS")
             return
 
         logger.info(f"Escaner {escaner.nombre}: {len(simbolos)} simbolos a evaluar")
@@ -148,6 +151,11 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                     logger.error(f"Error en fase 1 para {simbolo}: {e}", exc_info=True)
 
         logger.info(f"Escaner {escaner.nombre}: ejecucion completada")
+
+        # Si es tipo UNA_VEZ, notificar que termino
+        if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
+            self._notificar_escaner_completado(escaner, "COMPLETADO")
+
         sys.stdout.flush()
 
     # =========================================================================
@@ -174,6 +182,11 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                     logger.error(f"Error evaluando {simbolo} en escaner {escaner.nombre}: {e}")
 
         logger.info(f"Escaner clasico {escaner.nombre} completado: {senales_generadas} senales generadas")
+
+        # Si es tipo UNA_VEZ, notificar que termino
+        if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
+            self._notificar_escaner_completado(escaner, "COMPLETADO")
+
         sys.stdout.flush()
 
     def _evaluar_simbolo(self, escaner: Escaner, simbolo: str) -> bool:
@@ -412,3 +425,38 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 return True
         self._senales_emitidas[key] = now
         return False
+
+    def _notificar_escaner_completado(self, escaner: Escaner, razon: str) -> None:
+        """Notifica que un escaner UNA_VEZ ha completado su ejecucion."""
+        if not self.obj_kafka_producer:
+            logger.warning("Kafka producer no disponible, no se puede notificar escaner completado")
+            return
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+        logger.info(f"Notificando escaner completado: {escaner.nombre} (razon: {razon})")
+
+        # Publicar evento de escaner completado al topic scanner.state
+        self.obj_kafka_producer.publicar_escaner_completado({
+            "idEscaner": escaner.id_escaner,
+            "nombreEscaner": escaner.nombre,
+            "estadoAnterior": "INICIADO",
+            "estadoNuevo": "DETENIDO",
+            "razon": f"ESCANER_UNA_VEZ_{razon}",
+            "timestamp": now,
+        })
+
+        # Tambien publicar log
+        self.obj_kafka_producer.publicar_log({
+            "servicioOrigen": "signal-processing-service",
+            "nivel": "INFO",
+            "mensaje": f"Escaner '{escaner.nombre}' (UNA_VEZ) completado. Razon: {razon}",
+            "idEscaner": escaner.id_escaner,
+            "symbol": None,
+            "categoria": "SCANNER",
+            "timestamp": now,
+            "metadatos": json.dumps({"razon": razon, "tipoEjecucion": "UNA_VEZ"}),
+        })
+
+        logger.info(f"Evento escaner completado publicado exitosamente: {escaner.nombre}")
+        sys.stdout.flush()

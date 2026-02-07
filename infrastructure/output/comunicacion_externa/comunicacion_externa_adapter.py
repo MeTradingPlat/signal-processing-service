@@ -42,7 +42,9 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         self._yahoo = yahoo_adapter or YahooFinanceAdapter()
         logger.info("  -> YahooFinanceAdapter OK")
 
-        self._scanner_management = scanner_adapter or ScannerManagementAdapter()
+        self._scanner_management = scanner_adapter or ScannerManagementAdapter(
+            base_url=f"{SCANNER_SERVICE_URL}/escaner"
+        )
         logger.info("  -> ScannerManagementAdapter OK")
 
         self._market_data = market_adapter or MarketDataAdapter()

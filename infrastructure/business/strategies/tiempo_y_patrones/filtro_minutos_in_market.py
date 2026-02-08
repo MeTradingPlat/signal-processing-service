@@ -11,6 +11,10 @@ from infrastructure.business.strategies.base_filtro import BaseFiltro
 logger = logging.getLogger(__name__)
 
 # Market open: 9:30 AM ET = 14:30 UTC
+# NOTA: Este valor está hardcodeado en UTC porque el mercado NYSE opera en ET (Eastern Time)
+# El horario de apertura es 9:30 AM ET, que equivale a 14:30 UTC (sin daylight saving)
+# IMPORTANTE: Cuando se implemente Market Calendar Service, estos valores vendrán de la base de datos
+# y se ajustarán automáticamente según el mercado y considerando daylight saving time
 MARKET_OPEN_HOUR_UTC = 14
 MARKET_OPEN_MINUTE_UTC = 30
 

@@ -2,7 +2,7 @@
 
 import logging
 import sys
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -48,26 +48,29 @@ class EscanerScheduler:
             hora_inicio = self._parse_time(escaner.hora_inicio)
             hora_fin = self._parse_time(escaner.hora_fin)
 
-            logger.debug(f"  -> Hora inicio: {hora_inicio}, Hora fin: {hora_fin}")
+            logger.debug(f"  -> Hora inicio UTC: {hora_inicio}, Hora fin UTC: {hora_fin}")
             logger.debug(f"  -> Tipo ejecucion: {escaner.obj_tipo_ejecucion.enum_tipo_ejecucion}")
 
             if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
                 trigger = CronTrigger(
                     hour=hora_inicio.hour,
                     minute=hora_inicio.minute,
+                    timezone='UTC'
                 )
-                logger.debug(f"  -> CronTrigger: {hora_inicio.hour}:{hora_inicio.minute}")
+                logger.debug(f"  -> CronTrigger UTC: {hora_inicio.hour}:{hora_inicio.minute}")
             else:
+                # Usar datetime.now(timezone.utc) en vez de datetime.now()
                 trigger = IntervalTrigger(
                     seconds=POLLING_INTERVAL_SECONDS,
-                    start_date=datetime.now().replace(
+                    start_date=datetime.now(timezone.utc).replace(
                         hour=hora_inicio.hour, minute=hora_inicio.minute, second=0
                     ),
-                    end_date=datetime.now().replace(
+                    end_date=datetime.now(timezone.utc).replace(
                         hour=hora_fin.hour, minute=hora_fin.minute, second=0
                     ),
+                    timezone='UTC'
                 )
-                logger.debug(f"  -> IntervalTrigger: cada {POLLING_INTERVAL_SECONDS}s")
+                logger.debug(f"  -> IntervalTrigger UTC: cada {POLLING_INTERVAL_SECONDS}s")
 
             self.scheduler.add_job(
                 func=self.obj_procesar_senales_cu.ejecutar_escaner,
@@ -78,8 +81,8 @@ class EscanerScheduler:
                 replace_existing=True,
             )
             logger.info(
-                f"Escaner programado OK: '{escaner.nombre}' | "
-                f"{escaner.hora_inicio}-{escaner.hora_fin} | "
+                f"Escaner programado OK (UTC): '{escaner.nombre}' | "
+                f"{escaner.hora_inicio}-{escaner.hora_fin} UTC | "
                 f"Tipo: {escaner.obj_tipo_ejecucion.enum_tipo_ejecucion}"
             )
         except Exception as e:

@@ -165,7 +165,13 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
     def _ejecutar_escaner_clasico(self, escaner: Escaner, simbolos: list[str]) -> None:
         """Evaluacion clasica: todos los filtros con velas cerradas cada 60s."""
         logger.info(f"Ejecutando escaner clasico: {escaner.nombre} con {len(simbolos)} simbolos")
+
+        # Publicar log de inicio con detalles
+        self._publicar_log_inicio_escaner(escaner, simbolos)
+
         senales_generadas = 0
+        errores = 0
+        sin_datos = 0
 
         with ThreadPoolExecutor(max_workers=min(MAX_WORKERS_SIMBOLOS, len(simbolos))) as executor:
             futures = {
@@ -176,12 +182,18 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 simbolo = futures[future]
                 try:
                     resultado = future.result()
-                    if resultado:
+                    if resultado == "SIGNAL":
                         senales_generadas += 1
+                    elif resultado == "NO_DATA":
+                        sin_datos += 1
                 except Exception as e:
                     logger.error(f"Error evaluando {simbolo} en escaner {escaner.nombre}: {e}")
+                    errores += 1
 
         logger.info(f"Escaner clasico {escaner.nombre} completado: {senales_generadas} senales generadas")
+
+        # Publicar log de finalizacion con estadisticas
+        self._publicar_log_finalizacion_escaner(escaner, simbolos, senales_generadas, sin_datos, errores)
 
         # Si es tipo UNA_VEZ, notificar que termino
         if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
@@ -189,8 +201,14 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
 
         sys.stdout.flush()
 
-    def _evaluar_simbolo(self, escaner: Escaner, simbolo: str) -> bool:
-        """Evaluacion clasica de todos los filtros para un simbolo."""
+    def _evaluar_simbolo(self, escaner: Escaner, simbolo: str) -> str:
+        """Evaluacion clasica de todos los filtros para un simbolo.
+
+        Returns:
+            "SIGNAL" - Se genero una senal
+            "NO_DATA" - No se pudo obtener datos
+            "NO_MATCH" - No cumplio con los filtros
+        """
         logger.debug(f"Evaluando {simbolo} para escaner {escaner.nombre}")
 
         timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(
@@ -205,7 +223,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
 
         if not candles_por_timeframe:
             logger.warning(f"No se obtuvo data de candles para {simbolo}")
-            return False
+            return "NO_DATA"
 
         datos_fundamentales = self.obj_comunicacion_externa.obtener_datos_fundamentales(simbolo)
 
@@ -219,9 +237,9 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         if resultado:
             logger.info(f"SENAL DETECTADA: {simbolo} en escaner {escaner.nombre}")
             self._emitir_senal(escaner, simbolo)
-            return True
+            return "SIGNAL"
 
-        return False
+        return "NO_MATCH"
 
     # =========================================================================
     # Fase 1: filtros de estado (cada 60s)
@@ -425,6 +443,83 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 return True
         self._senales_emitidas[key] = now
         return False
+
+    def _publicar_log_inicio_escaner(self, escaner: Escaner, simbolos: list[str]) -> None:
+        """Publica log detallado al iniciar la ejecucion de un escaner."""
+        if not self.obj_kafka_producer:
+            return
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        filtros_str = ", ".join([f.enum_filtro for f in escaner.filtros])
+        mercados_str = ", ".join([m.enum_mercado for m in escaner.mercados])
+
+        mensaje = (
+            f"Escaner '{escaner.nombre}' iniciado\n"
+            f"- Filtros: [{filtros_str}]\n"
+            f"- Mercados: [{mercados_str}]\n"
+            f"- Símbolos a evaluar: {len(simbolos)}\n"
+            f"- Horario: {escaner.hora_inicio}-{escaner.hora_fin} UTC\n"
+            f"- Tipo: {escaner.obj_tipo_ejecucion.enum_tipo_ejecucion}"
+        )
+
+        self.obj_kafka_producer.publicar_log({
+            "servicioOrigen": "signal-processing-service",
+            "nivel": "INFO",
+            "mensaje": mensaje,
+            "idEscaner": escaner.id_escaner,
+            "symbol": None,
+            "categoria": "SCANNER",
+            "timestamp": now,
+            "metadatos": json.dumps({
+                "filtros": [f.enum_filtro for f in escaner.filtros],
+                "mercados": [m.enum_mercado for m in escaner.mercados],
+                "totalSimbolos": len(simbolos)
+            }),
+        })
+        logger.info(f"Log de inicio publicado para escaner {escaner.nombre}")
+
+    def _publicar_log_finalizacion_escaner(self, escaner: Escaner, simbolos: list[str],
+                                            senales_generadas: int, sin_datos: int, errores: int) -> None:
+        """Publica log detallado con estadisticas al finalizar la ejecucion de un escaner."""
+        if not self.obj_kafka_producer:
+            return
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        total_evaluados = len(simbolos)
+        no_match = total_evaluados - senales_generadas - sin_datos - errores
+
+        mensaje = (
+            f"Escaner '{escaner.nombre}' finalizado\n"
+            f"- Símbolos evaluados: {total_evaluados}\n"
+            f"- Señales generadas: {senales_generadas}\n"
+            f"- Breakdown:\n"
+            f"  * Sin datos (timeout/error): {sin_datos}\n"
+            f"  * No cumplieron filtros: {no_match}\n"
+            f"  * Errores de evaluación: {errores}"
+        )
+
+        if total_evaluados > 0:
+            porcentaje_exito = (senales_generadas / total_evaluados) * 100
+            mensaje += f"\n- Tasa de éxito: {porcentaje_exito:.1f}%"
+
+        self.obj_kafka_producer.publicar_log({
+            "servicioOrigen": "signal-processing-service",
+            "nivel": "INFO",
+            "mensaje": mensaje,
+            "idEscaner": escaner.id_escaner,
+            "symbol": None,
+            "categoria": "SCANNER",
+            "timestamp": now,
+            "metadatos": json.dumps({
+                "totalSimbolos": total_evaluados,
+                "senalesGeneradas": senales_generadas,
+                "sinDatos": sin_datos,
+                "noMatch": no_match,
+                "errores": errores,
+                "tasaExito": round((senales_generadas / total_evaluados) * 100, 1) if total_evaluados > 0 else 0
+            }),
+        })
+        logger.info(f"Log de finalizacion publicado para escaner {escaner.nombre}")
 
     def _notificar_escaner_completado(self, escaner: Escaner, razon: str) -> None:
         """Notifica que un escaner UNA_VEZ ha completado su ejecucion."""

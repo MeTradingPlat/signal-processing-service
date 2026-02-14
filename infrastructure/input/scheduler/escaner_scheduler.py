@@ -48,7 +48,7 @@ class EscanerScheduler:
         sys.stdout.flush()
 
     def _programar_escaner(self, escaner: Escaner) -> None:
-        """Programa un escaner individual."""
+        """Programa un escaner individual con ejecucion recurrente diaria (lun-vie)."""
         logger.info(f"Programando escaner: {escaner.nombre} (ID: {escaner.id_escaner})")
         try:
             hora_inicio = self._parse_time(escaner.hora_inicio)
@@ -63,20 +63,37 @@ class EscanerScheduler:
                     minute=hora_inicio.minute,
                     timezone='UTC'
                 )
-                logger.debug(f"  -> CronTrigger UTC: {hora_inicio.hour}:{hora_inicio.minute}")
+                logger.debug(f"  -> CronTrigger UTC: {hora_inicio.hour}:{hora_inicio.minute:02d} (una vez)")
             else:
+                # PERIODICO: CronTrigger recurrente lun-vie para re-ejecucion diaria
                 intervalo = self._calcular_intervalo_escaner(escaner)
-                trigger = IntervalTrigger(
-                    seconds=intervalo,
-                    start_date=datetime.now(timezone.utc).replace(
-                        hour=hora_inicio.hour, minute=hora_inicio.minute, second=0
-                    ),
-                    end_date=datetime.now(timezone.utc).replace(
-                        hour=hora_fin.hour, minute=hora_fin.minute, second=0
-                    ),
-                    timezone='UTC'
-                )
-                logger.info(f"  -> IntervalTrigger UTC: cada {intervalo}s (basado en timeframes de filtros)")
+                interval_minutes = intervalo // 60
+
+                # Ajustar hora_fin para rango inclusivo (21:00 -> ejecutar hasta 20:59)
+                hora_fin_int = hora_fin.hour if hora_fin.minute == 0 else hora_fin.hour
+
+                if interval_minutes < 1:
+                    # Intervalos < 60s: usar IntervalTrigger continuo + validacion manual de horario
+                    logger.warning(
+                        f"Intervalo {intervalo}s < 60s: usando IntervalTrigger continuo. "
+                        f"Horario {escaner.hora_inicio}-{escaner.hora_fin} se valida en ejecutar_escaner()."
+                    )
+                    trigger = IntervalTrigger(
+                        seconds=intervalo,
+                        timezone='UTC'
+                    )
+                else:
+                    # Intervalos >= 60s: CronTrigger con day_of_week para re-ejecucion diaria
+                    trigger = CronTrigger(
+                        day_of_week='mon-fri',  # Solo dias laborables
+                        hour=f'{hora_inicio.hour}-{hora_fin_int}',  # Rango horario
+                        minute=f'*/{interval_minutes}' if interval_minutes > 1 else '*',
+                        timezone='UTC'
+                    )
+                    logger.info(
+                        f"  -> CronTrigger UTC: lun-vie {hora_inicio.hour}:00-{hora_fin_int}:59, "
+                        f"cada {interval_minutes}min (recurrente diario)"
+                    )
 
             self.scheduler.add_job(
                 func=self.obj_procesar_senales_cu.ejecutar_escaner,

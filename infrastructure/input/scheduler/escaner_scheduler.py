@@ -13,12 +13,18 @@ from config import POLLING_INTERVAL_SECONDS
 
 logger = logging.getLogger(__name__)
 
+INTERVALO_POR_TIMEFRAME = {
+    "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+    "H1": 3600, "D1": 86400, "W1": 604800, "MO1": 2592000,
+}
+
 
 class EscanerScheduler:
 
-    def __init__(self, obj_procesar_senales_cu):
+    def __init__(self, obj_procesar_senales_cu, obj_filtro_executor=None):
         logger.info("Inicializando EscanerScheduler...")
         self.obj_procesar_senales_cu = obj_procesar_senales_cu
+        self.obj_filtro_executor = obj_filtro_executor
         self.scheduler = BlockingScheduler()
         logger.info(f"  -> POLLING_INTERVAL_SECONDS: {POLLING_INTERVAL_SECONDS}")
         logger.info("EscanerScheduler inicializado OK")
@@ -59,9 +65,9 @@ class EscanerScheduler:
                 )
                 logger.debug(f"  -> CronTrigger UTC: {hora_inicio.hour}:{hora_inicio.minute}")
             else:
-                # Usar datetime.now(timezone.utc) en vez de datetime.now()
+                intervalo = self._calcular_intervalo_escaner(escaner)
                 trigger = IntervalTrigger(
-                    seconds=POLLING_INTERVAL_SECONDS,
+                    seconds=intervalo,
                     start_date=datetime.now(timezone.utc).replace(
                         hour=hora_inicio.hour, minute=hora_inicio.minute, second=0
                     ),
@@ -70,7 +76,7 @@ class EscanerScheduler:
                     ),
                     timezone='UTC'
                 )
-                logger.debug(f"  -> IntervalTrigger UTC: cada {POLLING_INTERVAL_SECONDS}s")
+                logger.info(f"  -> IntervalTrigger UTC: cada {intervalo}s (basado en timeframes de filtros)")
 
             self.scheduler.add_job(
                 func=self.obj_procesar_senales_cu.ejecutar_escaner,
@@ -127,6 +133,26 @@ class EscanerScheduler:
         self.scheduler.shutdown()
         logger.info("Scheduler detenido OK")
         sys.stdout.flush()
+
+    def _calcular_intervalo_escaner(self, escaner: Escaner) -> int:
+        """Calcula el intervalo optimo basado en el menor timeframe de los filtros."""
+        if not self.obj_filtro_executor:
+            return POLLING_INTERVAL_SECONDS
+
+        try:
+            timeframes = self.obj_filtro_executor.obtener_timeframes_necesarios(escaner.filtros)
+            if not timeframes:
+                return POLLING_INTERVAL_SECONDS
+
+            min_intervalo = POLLING_INTERVAL_SECONDS
+            for tf in timeframes:
+                intervalo = INTERVALO_POR_TIMEFRAME.get(tf, POLLING_INTERVAL_SECONDS)
+                min_intervalo = min(min_intervalo, intervalo)
+
+            return max(60, min_intervalo)
+        except Exception as e:
+            logger.error(f"Error calculando intervalo para escaner {escaner.nombre}: {e}")
+            return POLLING_INTERVAL_SECONDS
 
     @staticmethod
     def _parse_time(time_str: str) -> time:

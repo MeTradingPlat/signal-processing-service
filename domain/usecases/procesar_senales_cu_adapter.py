@@ -136,10 +136,34 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         )
         sys.stdout.flush()
 
+        # Batch fetch TODOS los simbolos para TODOS los timeframes (state + event filters)
+        todos_filtros = state_filters + event_filters
+        timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(todos_filtros)
+        logger.info(f"Batch fetching para fase 1: timeframes={timeframes_necesarios}, {len(simbolos)} symbols")
+
+        cache_candles = {}
+        BATCH_SIZE = 200
+
+        for tf, cantidad_velas in timeframes_necesarios.items():
+            for i in range(0, len(simbolos), BATCH_SIZE):
+                batch_symbols = simbolos[i:i + BATCH_SIZE]
+                try:
+                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
+                        symbols=batch_symbols,
+                        timeframe=tf,
+                        bars=cantidad_velas
+                    )
+                    for symbol, candles in resultado_batch.items():
+                        cache_candles[(symbol, tf)] = candles
+                except Exception as e:
+                    logger.error(f"Error en batch fetch fase1 tf={tf}: {e}")
+
+        logger.info(f"Batch fetch fase1 completado: {len(cache_candles)} (symbol,tf) pairs en cache")
+
         with ThreadPoolExecutor(max_workers=min(MAX_WORKERS_SIMBOLOS, len(simbolos))) as executor:
             futures = {
                 executor.submit(
-                    self._evaluar_fase1, escaner, simbolo, state_filters, event_filters
+                    self._evaluar_fase1, escaner, simbolo, state_filters, event_filters, cache_candles
                 ): simbolo
                 for simbolo in simbolos
             }
@@ -163,32 +187,60 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
     # =========================================================================
 
     def _ejecutar_escaner_clasico(self, escaner: Escaner, simbolos: list[str]) -> None:
-        """Evaluacion clasica: todos los filtros con velas cerradas cada 60s."""
-        logger.info(f"Ejecutando escaner clasico: {escaner.nombre} con {len(simbolos)} simbolos")
+        """Evaluacion clasica con batch fetching: prefetch ALL symbols, evaluate locally."""
+        logger.info(f"Ejecutando escaner clasico BATCH: {escaner.nombre} con {len(simbolos)} simbolos")
 
         # Publicar log de inicio con detalles
         self._publicar_log_inicio_escaner(escaner, simbolos)
 
+        # 1. Determinar timeframes necesarios
+        timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(escaner.filtros)
+        logger.info(f"Timeframes necesarios: {timeframes_necesarios}")
+
+        # 2. Batch fetch para cada timeframe en sub-batches de 200
+        cache_candles = {}  # {(symbol, tf): [Candle, ...]}
+        BATCH_SIZE = 200
+
+        for tf, cantidad_velas in timeframes_necesarios.items():
+            logger.info(f"Fetching batch para timeframe {tf}, {cantidad_velas} velas, {len(simbolos)} symbols")
+
+            for i in range(0, len(simbolos), BATCH_SIZE):
+                batch_symbols = simbolos[i:i + BATCH_SIZE]
+                logger.info(f"  Sub-batch {i//BATCH_SIZE + 1}: {len(batch_symbols)} symbols")
+
+                try:
+                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
+                        symbols=batch_symbols,
+                        timeframe=tf,
+                        bars=cantidad_velas
+                    )
+
+                    for symbol, candles in resultado_batch.items():
+                        cache_candles[(symbol, tf)] = candles
+
+                    logger.info(f"  Sub-batch completado: {len(resultado_batch)} symbols con datos")
+
+                except Exception as e:
+                    logger.error(f"Error en batch fetch tf={tf} batch={i//BATCH_SIZE + 1}: {e}")
+                    # Continuar con el siguiente sub-batch
+
+        logger.info(f"Batch fetching completado: {len(cache_candles)} (symbol,tf) pairs en cache")
+
+        # 3. Evaluar cada simbolo localmente desde el cache
         senales_generadas = 0
         errores = 0
         sin_datos = 0
 
-        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS_SIMBOLOS, len(simbolos))) as executor:
-            futures = {
-                executor.submit(self._evaluar_simbolo, escaner, simbolo): simbolo
-                for simbolo in simbolos
-            }
-            for future in as_completed(futures):
-                simbolo = futures[future]
-                try:
-                    resultado = future.result()
-                    if resultado == "SIGNAL":
-                        senales_generadas += 1
-                    elif resultado == "NO_DATA":
-                        sin_datos += 1
-                except Exception as e:
-                    logger.error(f"Error evaluando {simbolo} en escaner {escaner.nombre}: {e}")
-                    errores += 1
+        for simbolo in simbolos:
+            try:
+                resultado = self._evaluar_simbolo_con_cache(escaner, simbolo, cache_candles)
+                if resultado == "SIGNAL":
+                    senales_generadas += 1
+                elif resultado == "NO_DATA":
+                    sin_datos += 1
+            except Exception as e:
+                logger.error(f"Error evaluando {simbolo} desde cache: {e}")
+                errores += 1
 
         logger.info(f"Escaner clasico {escaner.nombre} completado: {senales_generadas} senales generadas")
 
@@ -241,20 +293,61 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
 
         return "NO_MATCH"
 
+    def _evaluar_simbolo_con_cache(self, escaner: Escaner, simbolo: str, cache_candles: dict) -> str:
+        """Evaluacion de un simbolo usando candles pre-fetched del cache.
+
+        Args:
+            cache_candles: dict {(symbol, timeframe): [Candle, ...]}
+
+        Returns:
+            "SIGNAL" - Se genero una senal
+            "NO_DATA" - No se pudo obtener datos
+            "NO_MATCH" - No cumplio con los filtros
+        """
+        logger.debug(f"Evaluando {simbolo} desde cache para escaner {escaner.nombre}")
+
+        timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(escaner.filtros)
+
+        candles_por_timeframe = {}
+        for tf, _ in timeframes_necesarios.items():
+            candles = cache_candles.get((simbolo, tf), [])
+            if candles:
+                candles_por_timeframe[tf] = candles
+
+        if not candles_por_timeframe:
+            logger.warning(f"No hay data en cache para {simbolo}")
+            return "NO_DATA"
+
+        datos_fundamentales = self.obj_comunicacion_externa.obtener_datos_fundamentales(simbolo)
+
+        resultado = self.obj_filtro_executor.ejecutar_filtros(
+            filtros=escaner.filtros,
+            candles_por_timeframe=candles_por_timeframe,
+            simbolo=simbolo,
+            datos_fundamentales=datos_fundamentales,
+        )
+
+        if resultado:
+            logger.info(f"SENAL DETECTADA: {simbolo} en escaner {escaner.nombre}")
+            self._emitir_senal(escaner, simbolo)
+            return "SIGNAL"
+
+        return "NO_MATCH"
+
     # =========================================================================
     # Fase 1: filtros de estado (cada 60s)
     # =========================================================================
 
-    def _evaluar_fase1(self, escaner, simbolo, state_filters, event_filters):
-        """Evalua filtros de estado. Si pasan, registra simbolo en watchlist del event loop."""
-        logger.debug(f"Fase 1: evaluando {simbolo} para escaner {escaner.nombre}")
+    def _evaluar_fase1(self, escaner, simbolo, state_filters, event_filters, cache_candles):
+        """Evalua filtros de estado desde cache. Si pasan, registra simbolo en watchlist del event loop."""
+        logger.debug(f"Fase 1: evaluando {simbolo} desde cache para escaner {escaner.nombre}")
 
         todos_filtros = state_filters + event_filters
         timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(todos_filtros)
 
         candles_por_timeframe = {}
-        for tf, cantidad_velas in timeframes_necesarios.items():
-            candles = self._obtener_candles(simbolo, tf, cantidad_velas)
+        for tf, _ in timeframes_necesarios.items():
+            candles = cache_candles.get((simbolo, tf), [])
             if candles:
                 candles_por_timeframe[tf] = candles
 

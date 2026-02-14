@@ -138,6 +138,39 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
             logger.error(f"Error obteniendo candles para {symbol}: {e}")
             return []
 
+    def obtener_candles_historicos_batch(
+        self, symbols: list[str], timeframe: str, bars: int
+    ) -> dict[str, list[Candle]]:
+        """POST /api/marketdata/historical/batch - obtiene candles para multiples simbolos."""
+        logger.info(f"Batch: obteniendo candles para {len(symbols)} symbols, tf={timeframe}, bars={bars}")
+        try:
+            data = self._market_data.obtener_velas_historicas_batch(symbols, timeframe, bars)
+
+            # Convertir data (dict {symbol: [dict, ...]}) a dict {symbol: [Candle, ...]}
+            resultado = {}
+            for symbol, candles_data in data.items():
+                candles = [
+                    Candle(
+                        symbol=item.get("symbol", symbol),
+                        timestamp=item.get("timestamp", ""),
+                        open=float(item.get("open", 0)),
+                        high=float(item.get("high", 0)),
+                        low=float(item.get("low", 0)),
+                        close=float(item.get("close", 0)),
+                        volume=float(item.get("volume", 0)),
+                    )
+                    for item in candles_data
+                ]
+                resultado[symbol] = candles
+
+            logger.info(f"Batch complete: {len(resultado)} symbols procesados, "
+                       f"{sum(len(c) for c in resultado.values())} candles totales")
+            return resultado
+
+        except Exception as e:
+            logger.error(f"Error en batch candles ({len(symbols)} symbols): {e}")
+            return {}
+
     # =========================================================================
     # Market Data Service - Barra en Formacion
     # =========================================================================

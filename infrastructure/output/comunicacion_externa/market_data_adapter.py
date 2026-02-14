@@ -53,3 +53,32 @@ class MarketDataAdapter:
         except Exception as e:
             self.logger.error(f"Error obteniendo ultima barra para {symbol}: {e}")
             return {}
+
+    def obtener_velas_historicas_batch(self, symbols: list[str], timeframe: str, bars: int = 100) -> dict:
+        """
+        POST /historical/batch - Obtiene candles para multiples simbolos en una sola peticion.
+        Retorna: {symbol: [list of candles], ...}
+        """
+        try:
+            url = f"{self.base_url}/historical/batch"
+            payload = {
+                "symbols": symbols,
+                "timeframe": timeframe,
+                "bars": bars
+            }
+            # Timeout escalado: base 30s + 0.05s por simbolo
+            timeout = 30 + len(symbols) * 0.05
+
+            self.logger.info(f"Batch request: {len(symbols)} symbols, tf={timeframe}, bars={bars}, timeout={timeout:.1f}s")
+            response = requests.post(url, json=payload, timeout=timeout)
+            response.raise_for_status()
+
+            result = response.json()
+            candles_por_simbolo = result.get("candlesPorSimbolo", {})
+
+            self.logger.info(f"Batch response: {len(candles_por_simbolo)} symbols con datos")
+            return candles_por_simbolo
+
+        except Exception as e:
+            self.logger.error(f"Error en batch request ({len(symbols)} symbols): {e}")
+            return {}

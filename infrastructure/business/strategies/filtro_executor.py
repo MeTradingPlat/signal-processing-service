@@ -9,6 +9,9 @@ from domain.models.escaner import Filtro
 logger = logging.getLogger(__name__)
 
 
+MINIMO_BARRAS = 15
+
+
 class FiltroExecutor:
 
     def __init__(self, obj_filtro_registry):
@@ -61,13 +64,13 @@ class FiltroExecutor:
             if impl is None:
                 continue
             tf = impl.get_timeframe_requerido(filtro)
-            cantidad = impl.get_cantidad_velas_requeridas(filtro)
+            cantidad = max(impl.get_cantidad_velas_requeridas(filtro), MINIMO_BARRAS)
             if tf in timeframes:
                 timeframes[tf] = max(timeframes[tf], cantidad)
             else:
                 timeframes[tf] = cantidad
 
         if not timeframes:
-            timeframes["M5"] = 100
+            timeframes["M5"] = max(100, MINIMO_BARRAS)
 
         return timeframes

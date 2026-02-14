@@ -205,7 +205,7 @@ def main():
     logger.info("PASO 7: Creando EscanerScheduler...")
     sys.stdout.flush()
     try:
-        obj_scheduler = EscanerScheduler(obj_procesar_senales)
+        obj_scheduler = EscanerScheduler(obj_procesar_senales, obj_filtro_executor=obj_filtro_executor)
         logger.info("EscanerScheduler creado OK")
     except Exception as e:
         logger.error(f"Error creando EscanerScheduler: {e}", exc_info=True)

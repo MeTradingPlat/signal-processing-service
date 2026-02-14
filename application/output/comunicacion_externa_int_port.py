@@ -37,6 +37,11 @@ class ComunicacionExternaIntPort(ABC):
         """Obtiene candles OHLCV historicos."""
         pass
 
+    @abstractmethod
+    def obtener_candles_historicos_batch(self, symbols: list[str], timeframe: str, bars: int) -> dict:
+        """Obtiene candles OHLCV para multiples simbolos. Retorna dict {symbol: [Candle, ...]}."""
+        pass
+
     # =========================================================================
     # Market Data Service - Quote
     # =========================================================================

@@ -126,6 +126,16 @@ except Exception as e:
     sys.exit(1)
 sys.stdout.flush()
 
+logger.info("Importando CandleCache...")
+sys.stdout.flush()
+try:
+    from domain.usecases.candle_cache import CandleCache
+    logger.info("CandleCache importado OK")
+except Exception as e:
+    logger.error(f"Error importando CandleCache: {e}", exc_info=True)
+    sys.exit(1)
+sys.stdout.flush()
+
 logger.info("=" * 60)
 logger.info("  TODOS LOS IMPORTS COMPLETADOS EXITOSAMENTE")
 logger.info("=" * 60)
@@ -188,13 +198,24 @@ def main():
         sys.exit(1)
     sys.stdout.flush()
 
-    logger.info("PASO 6: Creando ProcesarSenalesCUAdapter...")
+    logger.info("PASO 6: Creando CandleCache...")
+    sys.stdout.flush()
+    try:
+        obj_candle_cache = CandleCache()
+        logger.info("CandleCache creado OK")
+    except Exception as e:
+        logger.error(f"Error creando CandleCache: {e}", exc_info=True)
+        sys.exit(1)
+    sys.stdout.flush()
+
+    logger.info("PASO 7: Creando ProcesarSenalesCUAdapter...")
     sys.stdout.flush()
     try:
         obj_procesar_senales = ProcesarSenalesCUAdapter(
             obj_comunicacion_externa=obj_comunicacion_externa,
             obj_filtro_executor=obj_filtro_executor,
             obj_kafka_producer=obj_kafka_producer,
+            obj_candle_cache=obj_candle_cache,
         )
         logger.info("ProcesarSenalesCUAdapter creado OK")
     except Exception as e:
@@ -202,7 +223,7 @@ def main():
         sys.exit(1)
     sys.stdout.flush()
 
-    logger.info("PASO 7: Creando EscanerScheduler...")
+    logger.info("PASO 8: Creando EscanerScheduler...")
     sys.stdout.flush()
     try:
         obj_scheduler = EscanerScheduler(obj_procesar_senales, obj_filtro_executor=obj_filtro_executor)
@@ -213,12 +234,12 @@ def main():
     sys.stdout.flush()
 
     # Inyeccion circular
-    logger.info("PASO 8: Configurando inyeccion circular scheduler -> use case...")
+    logger.info("PASO 9: Configurando inyeccion circular scheduler -> use case...")
     obj_procesar_senales.obj_scheduler = obj_scheduler
     logger.info("Inyeccion circular configurada OK")
     sys.stdout.flush()
 
-    logger.info("PASO 9: Creando EventLoopScheduler...")
+    logger.info("PASO 10: Creando EventLoopScheduler...")
     sys.stdout.flush()
     try:
         obj_event_loop = EventLoopScheduler(obj_procesar_senales)
@@ -236,7 +257,7 @@ def main():
 
     # --- Iniciar servicio ---
     try:
-        logger.info("PASO 10: Obteniendo escaneres activos desde scanner-management-service...")
+        logger.info("PASO 11: Obteniendo escaneres activos desde scanner-management-service...")
         sys.stdout.flush()
         escaneres_activos = obj_procesar_senales.iniciar()
 
@@ -248,13 +269,13 @@ def main():
                 logger.info(f"  - Escaner: {esc.nombre} (ID: {esc.id_escaner})")
         sys.stdout.flush()
 
-        logger.info("PASO 11: Programando escaneres en scheduler...")
+        logger.info("PASO 12: Programando escaneres en scheduler...")
         sys.stdout.flush()
         obj_scheduler.programar_escaneres(escaneres_activos)
         logger.info("Escaneres programados OK")
         sys.stdout.flush()
 
-        logger.info("PASO 12: Importando dependencias de API (FastAPI, uvicorn)...")
+        logger.info("PASO 13: Importando dependencias de API (FastAPI, uvicorn)...")
         sys.stdout.flush()
         from threading import Thread
         import uvicorn
@@ -262,12 +283,12 @@ def main():
         logger.info("Dependencias de API importadas OK")
         sys.stdout.flush()
 
-        logger.info("PASO 13: Configurando use case en FastAPI controller...")
+        logger.info("PASO 14: Configurando use case en FastAPI controller...")
         set_use_case(obj_procesar_senales)
         logger.info("Use case configurado en controller OK")
         sys.stdout.flush()
 
-        logger.info("PASO 14: Iniciando scheduler en hilo background...")
+        logger.info("PASO 15: Iniciando scheduler en hilo background...")
         sys.stdout.flush()
         scheduler_thread = Thread(target=obj_scheduler.iniciar)
         scheduler_thread.daemon = True
@@ -275,7 +296,7 @@ def main():
         logger.info("Scheduler iniciado en hilo background OK")
         sys.stdout.flush()
 
-        logger.info("PASO 15: Iniciando event loop...")
+        logger.info("PASO 16: Iniciando event loop...")
         sys.stdout.flush()
         obj_event_loop.start()
         logger.info("Event loop iniciado OK")
@@ -287,7 +308,7 @@ def main():
         logger.info("=" * 60)
         sys.stdout.flush()
 
-        logger.info("PASO 16: Iniciando servidor uvicorn (bloqueante)...")
+        logger.info("PASO 17: Iniciando servidor uvicorn (bloqueante)...")
         sys.stdout.flush()
         uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 

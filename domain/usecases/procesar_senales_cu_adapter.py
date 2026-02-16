@@ -12,7 +12,13 @@ from application.output.comunicacion_externa_int_port import ComunicacionExterna
 from application.output.kafka_producer_int_port import KafkaProducerIntPort
 from domain.models.escaner import Escaner
 from domain.models.senal import Senal
-from config import MAX_WORKERS_SIMBOLOS, SIGNAL_COOLDOWN_SECONDS
+from domain.usecases.validador_barras import validar_barras
+from config import (
+    MAX_WORKERS_SIMBOLOS,
+    SIGNAL_COOLDOWN_SECONDS,
+    VALIDACION_MAX_REINTENTOS,
+    VALIDACION_PAUSA_REINTENTO_SEGUNDOS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +35,20 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         obj_comunicacion_externa: ComunicacionExternaIntPort,
         obj_filtro_executor,
         obj_kafka_producer: KafkaProducerIntPort = None,
+        obj_candle_cache=None,
     ):
         logger.info("Inicializando ProcesarSenalesCUAdapter...")
         self.obj_comunicacion_externa = obj_comunicacion_externa
         self.obj_filtro_executor = obj_filtro_executor
         self.obj_kafka_producer = obj_kafka_producer
+        self.obj_candle_cache = obj_candle_cache
         self.obj_scheduler = None
         self.obj_event_loop = None
         self._senales_emitidas = {}
         logger.info(f"  -> MAX_WORKERS_SIMBOLOS: {MAX_WORKERS_SIMBOLOS}")
         logger.info(f"  -> SIGNAL_COOLDOWN_SECONDS: {SIGNAL_COOLDOWN_SECONDS}")
         logger.info(f"  -> Kafka producer: {'SI' if obj_kafka_producer else 'NO'}")
+        logger.info(f"  -> Candle cache: {'SI' if obj_candle_cache else 'NO'}")
         logger.info("ProcesarSenalesCUAdapter inicializado OK")
         sys.stdout.flush()
 
@@ -92,6 +101,8 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
             self.obj_scheduler.remover_tarea_escaner(id_escaner)
         if self.obj_event_loop:
             self.obj_event_loop.remover_de_watchlist(id_escaner)
+        if self.obj_candle_cache:
+            self.obj_candle_cache.limpiar_escaner(id_escaner)
         logger.info(f"Escaner {id_escaner} detenido OK")
         sys.stdout.flush()
 
@@ -165,22 +176,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(todos_filtros)
         logger.info(f"Batch fetching para fase 1: timeframes={timeframes_necesarios}, {len(simbolos)} symbols")
 
-        cache_candles = {}
-        BATCH_SIZE = 200
-
-        for tf, cantidad_velas in timeframes_necesarios.items():
-            for i in range(0, len(simbolos), BATCH_SIZE):
-                batch_symbols = simbolos[i:i + BATCH_SIZE]
-                try:
-                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
-                        symbols=batch_symbols,
-                        timeframe=tf,
-                        bars=cantidad_velas
-                    )
-                    for symbol, candles in resultado_batch.items():
-                        cache_candles[(symbol, tf)] = candles
-                except Exception as e:
-                    logger.error(f"Error en batch fetch fase1 tf={tf}: {e}")
+        cache_candles = self._fetch_con_cache(escaner, simbolos, timeframes_necesarios)
 
         logger.info(f"Batch fetch fase1 completado: {len(cache_candles)} (symbol,tf) pairs en cache")
 
@@ -211,7 +207,12 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
     # =========================================================================
 
     def _ejecutar_escaner_clasico(self, escaner: Escaner, simbolos: list[str]) -> None:
-        """Evaluacion clasica con batch fetching: prefetch ALL symbols, evaluate locally."""
+        """Evaluacion clasica con batch fetching y cache incremental.
+
+        Primera ejecucion: fetch completo de todas las barras necesarias.
+        Ejecuciones posteriores: solo pide barras nuevas y las anade al cache.
+        Valida las barras antes de evaluar. Cancela si no son confiables.
+        """
         logger.info(f"Ejecutando escaner clasico BATCH: {escaner.nombre} con {len(simbolos)} simbolos")
 
         # Publicar log de inicio con detalles
@@ -221,34 +222,10 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(escaner.filtros)
         logger.info(f"Timeframes necesarios: {timeframes_necesarios}")
 
-        # 2. Batch fetch para cada timeframe en sub-batches de 200
-        cache_candles = {}  # {(symbol, tf): [Candle, ...]}
-        BATCH_SIZE = 200
+        # 2. Fetch con cache incremental
+        cache_candles = self._fetch_con_cache(escaner, simbolos, timeframes_necesarios)
 
-        for tf, cantidad_velas in timeframes_necesarios.items():
-            logger.info(f"Fetching batch para timeframe {tf}, {cantidad_velas} velas, {len(simbolos)} symbols")
-
-            for i in range(0, len(simbolos), BATCH_SIZE):
-                batch_symbols = simbolos[i:i + BATCH_SIZE]
-                logger.info(f"  Sub-batch {i//BATCH_SIZE + 1}: {len(batch_symbols)} symbols")
-
-                try:
-                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
-                        symbols=batch_symbols,
-                        timeframe=tf,
-                        bars=cantidad_velas
-                    )
-
-                    for symbol, candles in resultado_batch.items():
-                        cache_candles[(symbol, tf)] = candles
-
-                    logger.info(f"  Sub-batch completado: {len(resultado_batch)} symbols con datos")
-
-                except Exception as e:
-                    logger.error(f"Error en batch fetch tf={tf} batch={i//BATCH_SIZE + 1}: {e}")
-                    # Continuar con el siguiente sub-batch
-
-        logger.info(f"Batch fetching completado: {len(cache_candles)} (symbol,tf) pairs en cache")
+        logger.info(f"Fetch completado: {len(cache_candles)} (symbol,tf) pairs disponibles")
 
         # 3. Evaluar cada simbolo localmente desde el cache
         senales_generadas = 0
@@ -276,6 +253,194 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
             self._notificar_escaner_completado(escaner, "COMPLETADO")
 
         sys.stdout.flush()
+
+    # =========================================================================
+    # Fetch con cache incremental
+    # =========================================================================
+
+    def _fetch_con_cache(
+        self, escaner: Escaner, simbolos: list[str], timeframes_necesarios: dict
+    ) -> dict:
+        """Fetch de barras con cache incremental.
+
+        Primera ejecucion: fetch completo. Siguientes: solo barras nuevas.
+        Retorna dict {(symbol, tf): [Candle, ...]}.
+        """
+        cache_candles = {}
+        BATCH_SIZE = 200
+
+        if not self.obj_candle_cache:
+            # Sin cache: fetch completo siempre (comportamiento original)
+            return self._fetch_completo(simbolos, timeframes_necesarios)
+
+        for tf, cantidad_velas in timeframes_necesarios.items():
+            # Clasificar simbolos: cuales necesitan fetch completo vs incremental
+            simbolos_completo = []
+            simbolos_incremental = []
+
+            for simbolo in simbolos:
+                if self.obj_candle_cache.necesita_fetch_completo(
+                    escaner.id_escaner, simbolo, tf
+                ):
+                    simbolos_completo.append(simbolo)
+                else:
+                    simbolos_incremental.append(simbolo)
+
+            logger.info(
+                f"Cache tf={tf}: {len(simbolos_completo)} fetch completo, "
+                f"{len(simbolos_incremental)} incremental"
+            )
+
+            # Fetch completo para simbolos sin cache
+            if simbolos_completo:
+                resultado = self._fetch_batch_con_reintentos(
+                    simbolos_completo, tf, cantidad_velas
+                )
+                for symbol, candles in resultado.items():
+                    self.obj_candle_cache.actualizar(
+                        escaner.id_escaner, symbol, tf, candles
+                    )
+                    cache_candles[(symbol, tf)] = self.obj_candle_cache.obtener(
+                        escaner.id_escaner, symbol, tf
+                    ) or candles
+
+            # Fetch incremental para simbolos con cache
+            if simbolos_incremental:
+                # Calcular cuantas barras nuevas necesitamos (usar el primer simbolo como referencia)
+                barras_nuevas = self.obj_candle_cache.barras_faltantes(
+                    escaner.id_escaner, simbolos_incremental[0], tf
+                )
+                if barras_nuevas <= 0:
+                    barras_nuevas = 2  # Minimo 2 barras de margen
+
+                logger.info(
+                    f"Fetch incremental tf={tf}: {barras_nuevas} barras nuevas "
+                    f"para {len(simbolos_incremental)} simbolos"
+                )
+
+                resultado = self._fetch_batch_con_reintentos(
+                    simbolos_incremental, tf, barras_nuevas
+                )
+                for symbol, candles in resultado.items():
+                    anadidas = self.obj_candle_cache.actualizar(
+                        escaner.id_escaner, symbol, tf, candles
+                    )
+                    self.obj_candle_cache.recortar(
+                        escaner.id_escaner, symbol, tf, cantidad_velas + 50
+                    )
+                    if anadidas > 0:
+                        logger.debug(f"Cache {symbol} tf={tf}: +{anadidas} barras nuevas")
+
+                # Usar datos del cache para todos los incrementales
+                for symbol in simbolos_incremental:
+                    cached = self.obj_candle_cache.obtener(
+                        escaner.id_escaner, symbol, tf
+                    )
+                    if cached:
+                        cache_candles[(symbol, tf)] = cached
+
+        return cache_candles
+
+    def _fetch_completo(
+        self, simbolos: list[str], timeframes_necesarios: dict
+    ) -> dict:
+        """Fetch completo sin cache (comportamiento original)."""
+        cache_candles = {}
+        BATCH_SIZE = 200
+
+        for tf, cantidad_velas in timeframes_necesarios.items():
+            for i in range(0, len(simbolos), BATCH_SIZE):
+                batch_symbols = simbolos[i:i + BATCH_SIZE]
+                try:
+                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
+                        symbols=batch_symbols, timeframe=tf, bars=cantidad_velas
+                    )
+                    for symbol, candles in resultado_batch.items():
+                        cache_candles[(symbol, tf)] = candles
+                except Exception as e:
+                    logger.error(f"Error en batch fetch tf={tf}: {e}")
+
+        return cache_candles
+
+    def _fetch_batch_con_reintentos(
+        self, simbolos: list[str], timeframe: str, bars: int
+    ) -> dict:
+        """Fetch batch con reintentos y validacion de barras."""
+        BATCH_SIZE = 200
+        resultado_total = {}
+
+        for i in range(0, len(simbolos), BATCH_SIZE):
+            batch_symbols = simbolos[i:i + BATCH_SIZE]
+
+            for intento in range(VALIDACION_MAX_REINTENTOS):
+                try:
+                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
+                        symbols=batch_symbols, timeframe=timeframe, bars=bars
+                    )
+
+                    # Validar una muestra
+                    muestra_valida = True
+                    for sym, candles in resultado_batch.items():
+                        resultado_val = validar_barras(candles, timeframe)
+                        if not resultado_val.valido:
+                            logger.warning(
+                                f"Validacion fallida intento {intento + 1}/{VALIDACION_MAX_REINTENTOS} "
+                                f"para {sym} tf={timeframe}: {resultado_val.razon}"
+                            )
+                            muestra_valida = False
+                            break
+
+                    if muestra_valida or intento == VALIDACION_MAX_REINTENTOS - 1:
+                        resultado_total.update(resultado_batch)
+                        if not muestra_valida:
+                            logger.error(
+                                f"Barras no confiables despues de {VALIDACION_MAX_REINTENTOS} "
+                                f"reintentos para tf={timeframe}. Usando datos disponibles."
+                            )
+                            self._publicar_log_validacion_fallida_batch(
+                                timeframe, len(batch_symbols)
+                            )
+                        break
+
+                    logger.info(
+                        f"Reintentando fetch en {VALIDACION_PAUSA_REINTENTO_SEGUNDOS}s..."
+                    )
+                    time.sleep(VALIDACION_PAUSA_REINTENTO_SEGUNDOS)
+
+                except Exception as e:
+                    logger.error(f"Error en batch fetch tf={timeframe} intento {intento + 1}: {e}")
+                    if intento < VALIDACION_MAX_REINTENTOS - 1:
+                        time.sleep(VALIDACION_PAUSA_REINTENTO_SEGUNDOS)
+
+        return resultado_total
+
+    def _publicar_log_validacion_fallida_batch(self, timeframe: str, num_simbolos: int) -> None:
+        """Publica log de validacion fallida a Kafka."""
+        if not self.obj_kafka_producer:
+            return
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        self.obj_kafka_producer.publicar_log({
+            "servicioOrigen": "signal-processing-service",
+            "nivel": "ERROR",
+            "mensaje": (
+                f"Validacion de barras fallida despues de {VALIDACION_MAX_REINTENTOS} "
+                f"reintentos para tf={timeframe}, {num_simbolos} simbolos"
+            ),
+            "idEscaner": None,
+            "symbol": None,
+            "categoria": "DATA",
+            "timestamp": now,
+            "metadatos": json.dumps({
+                "timeframe": timeframe,
+                "numSimbolos": num_simbolos,
+                "reintentos": VALIDACION_MAX_REINTENTOS,
+            }),
+        })
+
+    # =========================================================================
+    # Evaluacion de simbolos
+    # =========================================================================
 
     def _evaluar_simbolo(self, escaner: Escaner, simbolo: str) -> str:
         """Evaluacion clasica de todos los filtros para un simbolo.
@@ -320,12 +485,14 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
     def _evaluar_simbolo_con_cache(self, escaner: Escaner, simbolo: str, cache_candles: dict) -> str:
         """Evaluacion de un simbolo usando candles pre-fetched del cache.
 
+        Valida las barras antes de evaluar. Si la validacion falla, retorna NO_DATA.
+
         Args:
             cache_candles: dict {(symbol, timeframe): [Candle, ...]}
 
         Returns:
             "SIGNAL" - Se genero una senal
-            "NO_DATA" - No se pudo obtener datos
+            "NO_DATA" - No se pudo obtener datos o datos no confiables
             "NO_MATCH" - No cumplio con los filtros
         """
         logger.debug(f"Evaluando {simbolo} desde cache para escaner {escaner.nombre}")
@@ -335,11 +502,21 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         candles_por_timeframe = {}
         for tf, _ in timeframes_necesarios.items():
             candles = cache_candles.get((simbolo, tf), [])
-            if candles:
-                candles_por_timeframe[tf] = candles
+            if not candles:
+                continue
+
+            # Validar barras para este simbolo/timeframe
+            resultado_val = validar_barras(candles, tf)
+            if not resultado_val.valido:
+                logger.warning(
+                    f"Barras no validas para {simbolo} tf={tf}: {resultado_val.razon}"
+                )
+                continue
+
+            candles_por_timeframe[tf] = candles
 
         if not candles_por_timeframe:
-            logger.warning(f"No hay data en cache para {simbolo}")
+            logger.warning(f"No hay data valida en cache para {simbolo}")
             return "NO_DATA"
 
         datos_fundamentales = self.obj_comunicacion_externa.obtener_datos_fundamentales(simbolo)

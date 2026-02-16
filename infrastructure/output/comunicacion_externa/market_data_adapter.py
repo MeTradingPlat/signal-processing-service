@@ -1,5 +1,6 @@
 import requests
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from config import MARKETDATA_SERVICE_URL
@@ -75,6 +76,23 @@ class MarketDataAdapter:
 
             result = response.json()
             candles_por_simbolo = result.get("candlesPorSimbolo", {})
+
+            # Detectar clock skew con serverTimestamp
+            server_ts_str = result.get("serverTimestamp")
+            if server_ts_str:
+                try:
+                    server_ts = datetime.fromisoformat(
+                        server_ts_str.replace("Z", "+00:00")
+                    )
+                    ahora = datetime.now(timezone.utc)
+                    skew = abs((ahora - server_ts).total_seconds())
+                    if skew > 5:
+                        self.logger.warning(
+                            f"Clock skew detectado: {skew:.1f}s entre "
+                            f"signal-processing y marketdata-service"
+                        )
+                except (ValueError, TypeError):
+                    self.logger.debug(f"No se pudo parsear serverTimestamp: {server_ts_str}")
 
             self.logger.info(f"Batch response: {len(candles_por_simbolo)} symbols con datos")
             return candles_por_simbolo

@@ -45,6 +45,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         self.obj_scheduler = None
         self.obj_event_loop = None
         self._senales_emitidas = {}
+        self._feriado_notificado = {}  # {escaner_id: date} - evita spam de logs en feriados
         logger.info(f"  -> MAX_WORKERS_SIMBOLOS: {MAX_WORKERS_SIMBOLOS}")
         logger.info(f"  -> SIGNAL_COOLDOWN_SECONDS: {SIGNAL_COOLDOWN_SECONDS}")
         logger.info(f"  -> Kafka producer: {'SI' if obj_kafka_producer else 'NO'}")
@@ -125,6 +126,13 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
 
         # Validar que el mercado esté abierto
         if not self._es_dia_de_mercado():
+            fecha_hoy = datetime.now(timezone.utc).date()
+
+            # Solo notificar UNA vez por escaner+dia (evita spam en feriados/fines de semana)
+            if self._feriado_notificado.get(escaner.id_escaner) == fecha_hoy:
+                return
+
+            self._feriado_notificado[escaner.id_escaner] = fecha_hoy
             razon = self._obtener_razon_mercado_cerrado()
             logger.info(f"Escaner {escaner.nombre} OMITIDO: {razon}")
 

@@ -45,7 +45,6 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         self.obj_scheduler = None
         self.obj_event_loop = None
         self._senales_emitidas = {}
-        self._feriado_notificado = {}  # {escaner_id: date} - evita spam de logs en feriados
         logger.info(f"  -> MAX_WORKERS_SIMBOLOS: {MAX_WORKERS_SIMBOLOS}")
         logger.info(f"  -> SIGNAL_COOLDOWN_SECONDS: {SIGNAL_COOLDOWN_SECONDS}")
         logger.info(f"  -> Kafka producer: {'SI' if obj_kafka_producer else 'NO'}")
@@ -117,41 +116,12 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         - Fase 1: filtros de estado (cada 60s, velas cerradas)
         - Fase 2: filtros de evento (cada 0.1s, barra en formacion) via event loop
 
-        IMPORTANTE: Valida que el mercado esté abierto (lun-vie, sin feriados) antes de ejecutar.
+        NOTA: La validacion de mercado (feriados/fines de semana) se hace en el scheduler.
         """
         logger.info("=" * 60)
         logger.info(f"EJECUTANDO ESCANER: {escaner.nombre} (ID:{escaner.id_escaner})")
         logger.info("=" * 60)
         sys.stdout.flush()
-
-        # Validar que el mercado esté abierto
-        if not self._es_dia_de_mercado():
-            fecha_hoy = datetime.now(timezone.utc).date()
-
-            # Solo notificar UNA vez por escaner+dia (evita spam en feriados/fines de semana)
-            if self._feriado_notificado.get(escaner.id_escaner) == fecha_hoy:
-                return
-
-            self._feriado_notificado[escaner.id_escaner] = fecha_hoy
-            razon = self._obtener_razon_mercado_cerrado()
-            logger.info(f"Escaner {escaner.nombre} OMITIDO: {razon}")
-
-            # Publicar log informativo (no es error, es comportamiento esperado)
-            if self.obj_kafka_producer:
-                now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-                self.obj_kafka_producer.publicar_log({
-                    "servicioOrigen": "signal-processing-service",
-                    "nivel": "INFO",
-                    "mensaje": f"Escaner '{escaner.nombre}' omitido: {razon}",
-                    "idEscaner": escaner.id_escaner,
-                    "symbol": None,
-                    "categoria": "SCHEDULER",
-                    "timestamp": now,
-                    "metadatos": json.dumps({"razon": razon}),
-                })
-
-            sys.stdout.flush()
-            return
 
         simbolos = self._obtener_simbolos(escaner)
         if not simbolos:
@@ -745,66 +715,6 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 return True
         self._senales_emitidas[key] = now
         return False
-
-    def _es_dia_de_mercado(self) -> bool:
-        """
-        Verifica si hoy es un día de mercado (lun-vie, sin feriados NYSE).
-        Retorna True si el mercado está abierto, False si está cerrado.
-        """
-        now = datetime.now(timezone.utc)
-
-        # 1. Verificar fin de semana (sábado=5, domingo=6)
-        if now.weekday() >= 5:
-            return False
-
-        # 2. Verificar feriados NYSE 2026 (top 9 feriados que cierran el mercado completo)
-        # Nota: En producción, considera usar pandas_market_calendars o market-calendar-service
-        feriados_2026_utc = [
-            datetime(2026, 1, 1, tzinfo=timezone.utc),   # New Year's Day
-            datetime(2026, 1, 19, tzinfo=timezone.utc),  # Martin Luther King Jr. Day
-            datetime(2026, 2, 16, tzinfo=timezone.utc),  # Presidents' Day
-            datetime(2026, 4, 3, tzinfo=timezone.utc),   # Good Friday
-            datetime(2026, 5, 25, tzinfo=timezone.utc),  # Memorial Day
-            datetime(2026, 7, 3, tzinfo=timezone.utc),   # Independence Day (observed)
-            datetime(2026, 9, 7, tzinfo=timezone.utc),   # Labor Day
-            datetime(2026, 11, 26, tzinfo=timezone.utc), # Thanksgiving
-            datetime(2026, 12, 25, tzinfo=timezone.utc), # Christmas
-        ]
-
-        fecha_hoy = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if fecha_hoy in feriados_2026_utc:
-            return False
-
-        return True
-
-    def _obtener_razon_mercado_cerrado(self) -> str:
-        """Retorna una descripción legible de por qué el mercado está cerrado."""
-        now = datetime.now(timezone.utc)
-
-        # Verificar fin de semana
-        if now.weekday() == 5:
-            return "Mercado cerrado (Sábado)"
-        if now.weekday() == 6:
-            return "Mercado cerrado (Domingo)"
-
-        # Verificar feriados (simplificado, solo nombres comunes)
-        fecha_hoy = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        feriados_nombres = {
-            datetime(2026, 1, 1, tzinfo=timezone.utc): "New Year's Day",
-            datetime(2026, 1, 19, tzinfo=timezone.utc): "MLK Day",
-            datetime(2026, 2, 16, tzinfo=timezone.utc): "Presidents' Day",
-            datetime(2026, 4, 3, tzinfo=timezone.utc): "Good Friday",
-            datetime(2026, 5, 25, tzinfo=timezone.utc): "Memorial Day",
-            datetime(2026, 7, 3, tzinfo=timezone.utc): "Independence Day",
-            datetime(2026, 9, 7, tzinfo=timezone.utc): "Labor Day",
-            datetime(2026, 11, 26, tzinfo=timezone.utc): "Thanksgiving",
-            datetime(2026, 12, 25, tzinfo=timezone.utc): "Christmas",
-        }
-
-        if fecha_hoy in feriados_nombres:
-            return f"Mercado cerrado (Feriado: {feriados_nombres[fecha_hoy]})"
-
-        return "Mercado cerrado (razón desconocida)"
 
     def _publicar_log_inicio_escaner(self, escaner: Escaner, simbolos: list[str]) -> None:
         """Publica log detallado al iniciar la ejecucion de un escaner."""

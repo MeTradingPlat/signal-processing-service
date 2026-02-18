@@ -100,7 +100,9 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
         try:
             response = requests.get(url, params={"markets": enum_mercado}, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            simbolos = response.json()
+            equities = response.json()  # List of {symbol, description, listedMarket}
+            # Extraer solo los simbolos (strings)
+            simbolos = [equity['symbol'] for equity in equities]
             logger.info(f"Simbolos obtenidos para {enum_mercado}: {len(simbolos)}")
             return simbolos
         except requests.RequestException as e:

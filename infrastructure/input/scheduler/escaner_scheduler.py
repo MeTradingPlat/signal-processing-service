@@ -270,8 +270,9 @@ class EscanerScheduler:
     # =========================================================================
 
     def _ejecutar_con_validacion_mercado(self, escaner: Escaner) -> None:
-        """Wrapper: verifica que el mercado esté abierto antes de ejecutar.
-        Si está cerrado, publica 1 solo log por escaner+dia y no ejecuta más.
+        """Wrapper: verifica que el mercado esté abierto y que la hora actual
+        esté dentro de la ventana hora_inicio-hora_fin antes de ejecutar.
+        Si el mercado está cerrado, publica 1 solo log por escaner+dia.
         """
         if not es_dia_de_mercado():
             fecha_hoy = datetime.now(timezone.utc).date()
@@ -295,6 +296,21 @@ class EscanerScheduler:
                     "timestamp": now,
                     "metadatos": json.dumps({"razon": razon}),
                 })
+            sys.stdout.flush()
+            return
+
+        # Validar ventana horaria (el CronTrigger incluye la hora completa,
+        # p.ej. hour='14-21' dispara a las 21:43 aunque hora_fin=21:00)
+        ahora_time = datetime.now(timezone.utc).time()
+        hora_inicio_t = self._parse_time(escaner.hora_inicio)
+        hora_fin_t = self._parse_time(escaner.hora_fin)
+
+        if ahora_time < hora_inicio_t or ahora_time >= hora_fin_t:
+            logger.info(
+                f"Escaner '{escaner.nombre}' fuera de ventana de ejecucion "
+                f"(ahora={ahora_time.strftime('%H:%M:%S')} UTC, "
+                f"ventana={escaner.hora_inicio}-{escaner.hora_fin} UTC) — omitido"
+            )
             sys.stdout.flush()
             return
 
@@ -334,16 +350,31 @@ class EscanerScheduler:
             sys.stdout.flush()
             return
 
+        # Validar ventana horaria también en pre-despertar
         ahora = datetime.now(timezone.utc)
+        ahora_time = ahora.time()
+        hora_inicio_t = self._parse_time(escaner.hora_inicio)
+        hora_fin_t = self._parse_time(escaner.hora_fin)
+
+        if ahora_time < hora_inicio_t or ahora_time >= hora_fin_t:
+            logger.info(
+                f"Pre-despertar '{escaner.nombre}' fuera de ventana de ejecucion "
+                f"(ahora={ahora_time.strftime('%H:%M:%S')} UTC, "
+                f"ventana={escaner.hora_inicio}-{escaner.hora_fin} UTC) — omitido"
+            )
+            sys.stdout.flush()
+            return
 
         ts_cierre = self._calcular_proximo_cierre_barra(ahora, intervalo_segundos)
 
         if ts_cierre is None:
+            # El cierre de la barra del dia ya ocurrio (p.ej. D1 cierra a las 16:00 ET)
+            # No hay otra barra hoy, omitir ejecucion
             logger.info(
-                f"Pre-despertar {escaner.nombre}: no se pudo calcular cierre, "
-                f"ejecutando directamente"
+                f"Pre-despertar '{escaner.nombre}': cierre de barra del dia ya ocurrio, "
+                f"omitiendo ejecucion"
             )
-            self.obj_procesar_senales_cu.ejecutar_escaner(escaner)
+            sys.stdout.flush()
             return
 
         segundos_restantes = (ts_cierre - ahora).total_seconds()

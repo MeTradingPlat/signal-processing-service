@@ -89,6 +89,32 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
             if hasattr(self, 'obj_scheduler') and self.obj_scheduler:
                 self.obj_scheduler.agregar_tarea_escaner(escaner)
                 logger.info(f"Escaner {nombre} agregado al scheduler")
+
+                # Advertir si el escaner fue iniciado fuera de su ventana horaria
+                try:
+                    ahora_time = datetime.now(timezone.utc).time()
+                    hora_fin_str = escaner.hora_fin
+                    partes = hora_fin_str.split(":")
+                    from datetime import time as dt_time
+                    hora_fin_t = dt_time(int(partes[0]), int(partes[1]))
+                    hora_inicio_str = escaner.hora_inicio
+                    partes_ini = hora_inicio_str.split(":")
+                    hora_inicio_t = dt_time(int(partes_ini[0]), int(partes_ini[1]))
+
+                    if ahora_time >= hora_fin_t:
+                        logger.warning(
+                            f"Escaner '{nombre}' iniciado DESPUES de hora_fin "
+                            f"({ahora_time.strftime('%H:%M')} UTC >= {hora_fin_str} UTC). "
+                            f"No ejecutara hasta manana dentro de la ventana programada."
+                        )
+                    elif ahora_time < hora_inicio_t:
+                        logger.info(
+                            f"Escaner '{nombre}' iniciado antes de hora_inicio "
+                            f"({ahora_time.strftime('%H:%M')} UTC < {hora_inicio_str} UTC). "
+                            f"Esperara hasta las {hora_inicio_str} UTC para ejecutar."
+                        )
+                except Exception:
+                    pass
             else:
                 logger.warning("Scheduler no inyectado, no se puede programar dinamicamente.")
         else:
@@ -245,7 +271,6 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         Retorna dict {(symbol, tf): [Candle, ...]}.
         """
         cache_candles = {}
-        BATCH_SIZE = 200
 
         if not self.obj_candle_cache:
             # Sin cache: fetch completo siempre (comportamiento original)

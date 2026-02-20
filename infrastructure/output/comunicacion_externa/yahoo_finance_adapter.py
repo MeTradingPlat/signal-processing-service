@@ -43,12 +43,17 @@ class YahooFinanceAdapter:
                     logger.warning(f"Yahoo Finance: error for {symbol}: {data}")
                     datos = DatosFundamentales(symbol=symbol)
                 else:
+                    # Intentar obtener marketCap desde 'summary_detail' o 'price' si no esta en key_stats
+                    summary_detail = ticker.summary_detail.get(symbol, {})
+                    market_cap = float(summary_detail.get("marketCap", 0) or 0)
+
                     datos = DatosFundamentales(
                         symbol=symbol,
                         float_shares=float(data.get("floatShares", 0) or 0),
                         shares_outstanding=float(data.get("sharesOutstanding", 0) or 0),
                         short_interest=float(data.get("sharesShort", 0) or 0),
                         short_ratio=float(data.get("shortRatio", 0) or 0),
+                        market_cap=market_cap,
                     )
 
             with self._lock:
@@ -57,7 +62,7 @@ class YahooFinanceAdapter:
             logger.debug(
                 f"Yahoo Finance {symbol}: float={datos.float_shares}, "
                 f"outstanding={datos.shares_outstanding}, short={datos.short_interest}, "
-                f"ratio={datos.short_ratio}"
+                f"ratio={datos.short_ratio}, mcap={datos.market_cap}"
             )
             return datos
 

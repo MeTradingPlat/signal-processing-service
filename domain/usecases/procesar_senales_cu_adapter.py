@@ -588,6 +588,44 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 datos_fundamentales=datos_fundamentales,
             )
 
+    def re_evaluar_fase1(self, escaner, simbolo, candles_cache, datos_fundamentales) -> bool:
+        """
+        Re-evalua filtros de estado para un simbolo que ya esta en el loop de eventos.
+        Se llama cuando se cierra una nueva barra para asegurar que el setup sigue valido.
+        Retorna True si pasa, False si falla.
+        """
+        registry = self.obj_filtro_executor.obj_filtro_registry
+        state_filters, _ = registry.clasificar_filtros(escaner.filtros)
+        
+        if not state_filters:
+            return True
+
+        # Reconstruir dict candles_por_timeframe usando timeframes requeridos por state_filters
+        timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(state_filters)
+        candles_por_timeframe = {}
+        for tf, _ in timeframes_necesarios.items():
+            candles = candles_cache.get(tf, [])
+            if candles:
+                candles_por_timeframe[tf] = candles
+
+        if not candles_por_timeframe:
+            # Si faltan datos para filtros de estado, asumimos fallo (o podria ser warning)
+            logger.debug(f"Re-evaluacion {simbolo}: faltan datos para state filters")
+            return False
+
+        pasa = self.obj_filtro_executor.ejecutar_filtros(
+            filtros=state_filters,
+            candles_por_timeframe=candles_por_timeframe,
+            simbolo=simbolo,
+            datos_fundamentales=datos_fundamentales,
+        )
+        
+        if not pasa:
+            logger.info(f"Re-evaluacion {simbolo}: dejo de cumplir filtros de estado")
+            return False
+            
+        return True
+
     # =========================================================================
     # Fase 2: evaluacion de evento (llamado por EventLoopScheduler cada 0.1s)
     # =========================================================================

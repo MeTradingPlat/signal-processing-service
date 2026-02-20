@@ -196,89 +196,59 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
             logger.error(f"Error obteniendo barra en formacion para {symbol}: {e}")
             return None
 
-    # =========================================================================
-    # Market Data Service - Quote
-    # =========================================================================
-
-    def obtener_quote(self, symbol: str) -> dict:
-        """GET /api/marketdata/quote/{symbol}"""
-        url = f"{MARKETDATA_SERVICE_URL}/marketdata/quote/{symbol}"
+    def obtener_ultima_barra_completa_batch(self, symbols: list[str], timeframe: str) -> dict[str, Candle]:
+        """POST /historical/batch/last - obtiene la ultima barra cerrada para multiples simbolos."""
+        logger.info(f"Batch Last: obteniendo ultima barra para {len(symbols)} symbols, tf={timeframe}")
         try:
-            response = requests.get(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            logger.warning(f"No se pudo obtener quote para {symbol}: {e}")
+            data = self._market_data.obtener_ultima_barra_completa_batch(symbols, timeframe)
+            resultado = {}
+            for symbol, candle_data in data.items():
+                if candle_data:
+                    resultado[symbol] = Candle(
+                        symbol=candle_data.get("symbol", symbol),
+                        timestamp=candle_data.get("timestamp", ""),
+                        open=float(candle_data.get("open", 0)),
+                        high=float(candle_data.get("high", 0)),
+                        low=float(candle_data.get("low", 0)),
+                        close=float(candle_data.get("close", 0)),
+                        volume=float(candle_data.get("volume", 0)),
+                    )
+            logger.info(f"Batch Last complete: {len(resultado)} candles obtenidas")
+            return resultado
+        except Exception as e:
+            logger.error(f"Error en batch last candles ({len(symbols)} symbols): {e}")
             return {}
 
-    # =========================================================================
-    # Datos Fundamentales (Yahoo Finance + Market Data Service)
-    # =========================================================================
+    def obtener_barra_en_formacion_batch(self, symbols: list[str], timeframe: str) -> dict[str, Candle]:
+        """POST /historical/batch/current - obtiene la barra en formacion para multiples simbolos."""
+        logger.info(f"Batch Current: obteniendo barra formando para {len(symbols)} symbols, tf={timeframe}")
+        try:
+            data = self._market_data.obtener_barra_en_formacion_batch(symbols, timeframe)
+            resultado = {}
+            for symbol, candle_data in data.items():
+                if candle_data:
+                    resultado[symbol] = Candle(
+                        symbol=candle_data.get("symbol", symbol),
+                        timestamp=candle_data.get("timestamp", ""),
+                        open=float(candle_data.get("open", 0)),
+                        high=float(candle_data.get("high", 0)),
+                        low=float(candle_data.get("low", 0)),
+                        close=float(candle_data.get("close", 0)),
+                        volume=float(candle_data.get("volume", 0)),
+                    )
+            logger.info(f"Batch Current complete: {len(resultado)} candles obtenidas")
+            return resultado
+        except Exception as e:
+            logger.error(f"Error en batch current candles ({len(symbols)} symbols): {e}")
+            return {}
+
 
     def obtener_datos_fundamentales(self, symbol: str) -> DatosFundamentales:
         """
-        Combina datos de:
-        - Yahoo Finance: float, shares outstanding, short interest, short ratio
-        - Market Data Service: earnings (days_until_earnings), quote (market cap calc)
+        Obtiene datos fundamentales (solo Yahoo Finance por ahora).
         """
-        datos = self._yahoo.obtener_datos_fundamentales(symbol)
+        return self._yahoo.obtener_datos_fundamentales(symbol)
 
-        try:
-            url = f"{MARKETDATA_SERVICE_URL}/marketdata/earnings/{symbol}"
-            response = requests.get(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            earnings_data = response.json()
-            datos.days_until_earnings = int(earnings_data.get("daysUntilEarnings", 0))
-        except requests.RequestException:
-            logger.debug(f"No earnings data for {symbol}")
-
-        if datos.shares_outstanding > 0:
-            quote = self.obtener_quote(symbol)
-            last_price = float(quote.get("last", 0))
-            if last_price > 0:
-                datos.market_cap = last_price * datos.shares_outstanding
-
-        return datos
-
-    # =========================================================================
-    # Market Data Service - Ordenes
-    # =========================================================================
-
-    def enviar_orden_bracket(
-        self, symbol: str, action: str, quantity: int,
-        entry_price: float, stop_loss_price: float, take_profit_price: float
-    ) -> dict:
-        """POST /api/marketdata/orders"""
-        url = f"{MARKETDATA_SERVICE_URL}/marketdata/orders"
-        payload = {
-            "symbol": symbol,
-            "action": action,
-            "quantity": quantity,
-            "entryPrice": entry_price,
-            "stopLossPrice": stop_loss_price,
-            "takeProfitPrice": take_profit_price,
-        }
-        logger.info(f"Enviando orden bracket para {symbol}: {payload}")
-        try:
-            response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            result = response.json()
-            logger.info(f"Orden bracket enviada exitosamente: {result}")
-            return result
-        except requests.RequestException as e:
-            logger.error(f"Error enviando orden bracket para {symbol}: {e}")
-            return {"error": str(e)}
-
-    def cancelar_orden(self, order_id: str) -> None:
-        """DELETE /api/marketdata/orders/{orderId}"""
-        url = f"{MARKETDATA_SERVICE_URL}/marketdata/orders/{order_id}"
-        logger.info(f"Cancelando orden {order_id}...")
-        try:
-            response = requests.delete(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            logger.info(f"Orden {order_id} cancelada exitosamente")
-        except requests.RequestException as e:
-            logger.error(f"Error cancelando orden {order_id}: {e}")
 
     # =========================================================================
     # Mapeo de JSON a modelos de dominio (Escaner)

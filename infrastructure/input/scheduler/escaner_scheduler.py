@@ -137,8 +137,13 @@ class EscanerScheduler:
                 intervalo = self._calcular_intervalo_escaner(escaner)
                 interval_minutes = intervalo // 60
 
-                # Ajustar hora_fin para rango inclusivo (21:00 -> ejecutar hasta 20:59)
-                hora_fin_int = hora_fin.hour if hora_fin.minute == 0 else hora_fin.hour
+                # Ajustar hora_fin para el CronTrigger
+                # Si termina a las 21:00 en punto, el Cron debe disparar solo hasta las 20:59 (hora 20)
+                # Si termina a las 21:30, debe disparar en la hora 21.
+                if hora_fin.minute == 0 and hora_fin.hour > hora_inicio.hour:
+                    hora_fin_int = hora_fin.hour - 1
+                else:
+                    hora_fin_int = hora_fin.hour
 
                 # Determinar si aplica pre-despertar
                 usar_pre_despertar = intervalo >= PRE_DESPERTAR_UMBRAL_SEGUNDOS
@@ -301,15 +306,40 @@ class EscanerScheduler:
 
         # Validar ventana horaria (el CronTrigger incluye la hora completa,
         # p.ej. hour='14-21' dispara a las 21:43 aunque hora_fin=21:00)
-        ahora_time = datetime.now(timezone.utc).time()
+        # Hacer la comparacion sin info de zona horaria (UTC implicito) para evitar TypeErrors
+        ahora_time = datetime.now(timezone.utc).time().replace(tzinfo=None)
         hora_inicio_t = self._parse_time(escaner.hora_inicio)
         hora_fin_t = self._parse_time(escaner.hora_fin)
 
-        if ahora_time < hora_inicio_t or ahora_time >= hora_fin_t:
+        # Si son exactamente las 21:00:00 (hora fin), permitimos la ejecucion si queremos capturar el cierre.
+        # Pero si pasaron ya unos segundos/minutos (ej 21:05), cortamos.
+        # Definimos una tolerancia de latencia (ej. 30 seg) para aceptar la ejecucion "en punto".
+        # En general: Si ahora >= hora_fin + tolerancia -> RECHAZAR.
+        
+        # Logica estricta corregida:
+        # Se ejecuta si: inicio <= ahora < fin
+        # Excepcion: si ahora es apenas pasadito de fin (latencia del scheduler desencadenando a las 21:00:00.05)
+        
+        if ahora_time < hora_inicio_t:
+             logger.info(
+                f"Escaner '{escaner.nombre}' antes de hora inicio "
+                f"(ahora={ahora_time.strftime('%H:%M:%S')}, inicio={escaner.hora_inicio}) — omitido"
+            )
+             sys.stdout.flush()
+             return
+
+        # Tolerancia de 59 segundos para la hora de cierre exacta
+        # Ej: Fin 21:00:00. Ahora 21:00:58 -> OK (es el run de las 21:00). Ahora 21:01:00 -> OMITIR.
+        tolerancia_cierre = timedelta(seconds=59)
+        # Convertir a datetime dummy para poder sumar timedelta
+        dummy_date = datetime(2000, 1, 1)
+        dt_fin = dummy_date.replace(hour=hora_fin_t.hour, minute=hora_fin_t.minute, second=hora_fin_t.second)
+        dt_ahora = dummy_date.replace(hour=ahora_time.hour, minute=ahora_time.minute, second=ahora_time.second)
+        
+        if dt_ahora > (dt_fin + tolerancia_cierre):
             logger.info(
-                f"Escaner '{escaner.nombre}' fuera de ventana de ejecucion "
-                f"(ahora={ahora_time.strftime('%H:%M:%S')} UTC, "
-                f"ventana={escaner.hora_inicio}-{escaner.hora_fin} UTC) — omitido"
+                f"Escaner '{escaner.nombre}' despues de hora fin "
+                f"(ahora={ahora_time.strftime('%H:%M:%S')}, fin={escaner.hora_fin}) — omitido"
             )
             sys.stdout.flush()
             return
@@ -351,16 +381,30 @@ class EscanerScheduler:
             return
 
         # Validar ventana horaria también en pre-despertar
+        # Comparacion tz-naive (UTC implicito)
         ahora = datetime.now(timezone.utc)
-        ahora_time = ahora.time()
+        ahora_time = ahora.time().replace(tzinfo=None)
         hora_inicio_t = self._parse_time(escaner.hora_inicio)
         hora_fin_t = self._parse_time(escaner.hora_fin)
 
-        if ahora_time < hora_inicio_t or ahora_time >= hora_fin_t:
+        if ahora_time < hora_inicio_t:
+             logger.info(
+                f"Pre-despertar '{escaner.nombre}' antes de hora inicio "
+                f"(ahora={ahora_time.strftime('%H:%M:%S')}, inicio={escaner.hora_inicio}) — omitido"
+            )
+             sys.stdout.flush()
+             return
+
+        # Tolerancia de 59 segundos para la hora de cierre exacta
+        tolerancia_cierre = timedelta(seconds=59)
+        dummy_date = datetime(2000, 1, 1)
+        dt_fin = dummy_date.replace(hour=hora_fin_t.hour, minute=hora_fin_t.minute, second=hora_fin_t.second)
+        dt_ahora = dummy_date.replace(hour=ahora_time.hour, minute=ahora_time.minute, second=ahora_time.second)
+        
+        if dt_ahora > (dt_fin + tolerancia_cierre):
             logger.info(
-                f"Pre-despertar '{escaner.nombre}' fuera de ventana de ejecucion "
-                f"(ahora={ahora_time.strftime('%H:%M:%S')} UTC, "
-                f"ventana={escaner.hora_inicio}-{escaner.hora_fin} UTC) — omitido"
+                f"Pre-despertar '{escaner.nombre}' despues de hora fin "
+                f"(ahora={ahora_time.strftime('%H:%M:%S')}, fin={escaner.hora_fin}) — omitido"
             )
             sys.stdout.flush()
             return

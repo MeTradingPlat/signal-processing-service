@@ -42,45 +42,21 @@ class ComunicacionExternaIntPort(ABC):
         """Obtiene candles OHLCV para multiples simbolos. Retorna dict {symbol: [Candle, ...]}."""
         pass
 
-    # =========================================================================
-    # Market Data Service - Quote
-    # =========================================================================
-
     @abstractmethod
-    def obtener_quote(self, symbol: str) -> dict:
-        """Obtiene quote actual (bid, ask, last, halt status, etc)."""
+    def obtener_ultima_barra_completa_batch(self, symbols: list[str], timeframe: str) -> dict:
+        """Obtiene la ultima barra cerrada para multiples simbolos. Retorna dict {symbol: Candle}."""
         pass
 
-    # =========================================================================
-    # Datos Fundamentales (Yahoo Finance + Market Data Service)
-    # =========================================================================
+    @abstractmethod
+    def obtener_barra_en_formacion_batch(self, symbols: list[str], timeframe: str) -> dict:
+        """Obtiene la barra en formacion para multiples simbolos. Retorna dict {symbol: Candle}."""
+        pass
+
 
     @abstractmethod
     def obtener_datos_fundamentales(self, symbol: str) -> "DatosFundamentales":
         """
-        Obtiene datos fundamentales combinando:
-        - Yahoo Finance: float, shares outstanding, short interest, short ratio
-        - Market Data Service: days until earnings, halt status
-        - Calculado: market cap = last_price * shares_outstanding
+        Obtiene datos fundamentales (actualmente via Yahoo Finance).
         """
         pass
 
-    # =========================================================================
-    # Market Data Service - Ordenes
-    # =========================================================================
-
-    @abstractmethod
-    def enviar_orden_bracket(
-        self, symbol: str, action: str, quantity: int,
-        entry_price: float, stop_loss_price: float, take_profit_price: float
-    ) -> dict:
-        """
-        Envia una orden bracket (OTOCO) con stop loss y take profit.
-        Retorna dict con orderId, status.
-        """
-        pass
-
-    @abstractmethod
-    def cancelar_orden(self, order_id: str) -> None:
-        """Cancela una orden por su ID."""
-        pass

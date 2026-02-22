@@ -12,12 +12,11 @@ from application.output.comunicacion_externa_int_port import ComunicacionExterna
 from application.output.kafka_producer_int_port import KafkaProducerIntPort
 from domain.models.escaner import Escaner
 from domain.models.senal import Senal
-from domain.usecases.validador_barras import validar_barras
+from domain.services.signal_notification_service import SignalNotificationService
+from domain.services.data_fetch_service import DataFetchService
 from config import (
     MAX_WORKERS_SIMBOLOS,
     SIGNAL_COOLDOWN_SECONDS,
-    VALIDACION_MAX_REINTENTOS,
-    VALIDACION_PAUSA_REINTENTO_SEGUNDOS,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +44,9 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         self.obj_scheduler = None
         self.obj_event_loop = None
         self._senales_emitidas = {}
+
+        self.notification_service = SignalNotificationService(self.obj_kafka_producer)
+        self.data_fetch_service = DataFetchService(self.obj_comunicacion_externa, self.obj_candle_cache, self.notification_service)
         logger.info(f"  -> MAX_WORKERS_SIMBOLOS: {MAX_WORKERS_SIMBOLOS}")
         logger.info(f"  -> SIGNAL_COOLDOWN_SECONDS: {SIGNAL_COOLDOWN_SECONDS}")
         logger.info(f"  -> Kafka producer: {'SI' if obj_kafka_producer else 'NO'}")
@@ -180,7 +182,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(todos_filtros)
         logger.info(f"Batch fetching para fase 1: timeframes={timeframes_necesarios}, {len(simbolos)} symbols")
 
-        cache_candles = self._fetch_con_cache(escaner, simbolos, timeframes_necesarios)
+        cache_candles = self.data_fetch_service.fetch_con_cache(escaner, simbolos, timeframes_necesarios)
 
         logger.info(f"Batch fetch fase1 completado: {len(cache_candles)} (symbol,tf) pairs en cache")
 
@@ -220,14 +222,14 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         logger.info(f"Ejecutando escaner clasico BATCH: {escaner.nombre} con {len(simbolos)} simbolos")
 
         # Publicar log de inicio con detalles
-        self._publicar_log_inicio_escaner(escaner, simbolos)
+        self.notification_service.publicar_log_inicio_escaner(escaner, simbolos)
 
         # 1. Determinar timeframes necesarios
         timeframes_necesarios = self.obj_filtro_executor.obtener_timeframes_necesarios(escaner.filtros)
         logger.info(f"Timeframes necesarios: {timeframes_necesarios}")
 
         # 2. Fetch con cache incremental
-        cache_candles = self._fetch_con_cache(escaner, simbolos, timeframes_necesarios)
+        cache_candles = self.data_fetch_service.fetch_con_cache(escaner, simbolos, timeframes_necesarios)
 
         logger.info(f"Fetch completado: {len(cache_candles)} (symbol,tf) pairs disponibles")
 
@@ -250,196 +252,13 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         logger.info(f"Escaner clasico {escaner.nombre} completado: {senales_generadas} senales generadas")
 
         # Publicar log de finalizacion con estadisticas
-        self._publicar_log_finalizacion_escaner(escaner, simbolos, senales_generadas, sin_datos, errores)
+        self.notification_service.publicar_log_finalizacion_escaner(escaner, simbolos, senales_generadas, sin_datos, errores)
 
         # Si es tipo UNA_VEZ, notificar que termino
         if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
             self._notificar_escaner_completado(escaner, "COMPLETADO")
 
         sys.stdout.flush()
-
-    # =========================================================================
-    # Fetch con cache incremental
-    # =========================================================================
-
-    def _fetch_con_cache(
-        self, escaner: Escaner, simbolos: list[str], timeframes_necesarios: dict
-    ) -> dict:
-        """Fetch de barras con cache incremental.
-
-        Primera ejecucion: fetch completo. Siguientes: solo barras nuevas.
-        Retorna dict {(symbol, tf): [Candle, ...]}.
-        """
-        cache_candles = {}
-
-        if not self.obj_candle_cache:
-            # Sin cache: fetch completo siempre (comportamiento original)
-            return self._fetch_completo(simbolos, timeframes_necesarios)
-
-        for tf, cantidad_velas in timeframes_necesarios.items():
-            # Clasificar simbolos: cuales necesitan fetch completo vs incremental
-            simbolos_completo = []
-            simbolos_incremental = []
-
-            for simbolo in simbolos:
-                if self.obj_candle_cache.necesita_fetch_completo(
-                    escaner.id_escaner, simbolo, tf
-                ):
-                    simbolos_completo.append(simbolo)
-                else:
-                    simbolos_incremental.append(simbolo)
-
-            logger.info(
-                f"Cache tf={tf}: {len(simbolos_completo)} fetch completo, "
-                f"{len(simbolos_incremental)} incremental"
-            )
-
-            # Fetch completo para simbolos sin cache
-            if simbolos_completo:
-                resultado = self._fetch_batch_con_reintentos(
-                    simbolos_completo, tf, cantidad_velas
-                )
-                for symbol, candles in resultado.items():
-                    self.obj_candle_cache.actualizar(
-                        escaner.id_escaner, symbol, tf, candles
-                    )
-                    cache_candles[(symbol, tf)] = self.obj_candle_cache.obtener(
-                        escaner.id_escaner, symbol, tf
-                    ) or candles
-
-            # Fetch incremental para simbolos con cache
-            if simbolos_incremental:
-                # Calcular cuantas barras nuevas necesitamos (usar el primer simbolo como referencia)
-                barras_nuevas = self.obj_candle_cache.barras_faltantes(
-                    escaner.id_escaner, simbolos_incremental[0], tf
-                )
-                if barras_nuevas <= 0:
-                    barras_nuevas = 2  # Minimo 2 barras de margen
-
-                logger.info(
-                    f"Fetch incremental tf={tf}: {barras_nuevas} barras nuevas "
-                    f"para {len(simbolos_incremental)} simbolos"
-                )
-
-                resultado = self._fetch_batch_con_reintentos(
-                    simbolos_incremental, tf, barras_nuevas
-                )
-                for symbol, candles in resultado.items():
-                    anadidas = self.obj_candle_cache.actualizar(
-                        escaner.id_escaner, symbol, tf, candles
-                    )
-                    self.obj_candle_cache.recortar(
-                        escaner.id_escaner, symbol, tf, cantidad_velas + 50
-                    )
-                    if anadidas > 0:
-                        logger.debug(f"Cache {symbol} tf={tf}: +{anadidas} barras nuevas")
-
-                # Usar datos del cache para todos los incrementales
-                for symbol in simbolos_incremental:
-                    cached = self.obj_candle_cache.obtener(
-                        escaner.id_escaner, symbol, tf
-                    )
-                    if cached:
-                        cache_candles[(symbol, tf)] = cached
-
-        return cache_candles
-
-    def _fetch_completo(
-        self, simbolos: list[str], timeframes_necesarios: dict
-    ) -> dict:
-        """Fetch completo sin cache (comportamiento original)."""
-        cache_candles = {}
-        BATCH_SIZE = 200
-
-        for tf, cantidad_velas in timeframes_necesarios.items():
-            for i in range(0, len(simbolos), BATCH_SIZE):
-                batch_symbols = simbolos[i:i + BATCH_SIZE]
-                try:
-                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
-                        symbols=batch_symbols, timeframe=tf, bars=cantidad_velas
-                    )
-                    for symbol, candles in resultado_batch.items():
-                        cache_candles[(symbol, tf)] = candles
-                except Exception as e:
-                    logger.error(f"Error en batch fetch tf={tf}: {e}")
-
-        return cache_candles
-
-    def _fetch_batch_con_reintentos(
-        self, simbolos: list[str], timeframe: str, bars: int
-    ) -> dict:
-        """Fetch batch con reintentos y validacion de barras."""
-        BATCH_SIZE = 200
-        resultado_total = {}
-
-        for i in range(0, len(simbolos), BATCH_SIZE):
-            batch_symbols = simbolos[i:i + BATCH_SIZE]
-
-            for intento in range(VALIDACION_MAX_REINTENTOS):
-                try:
-                    resultado_batch = self.obj_comunicacion_externa.obtener_candles_historicos_batch(
-                        symbols=batch_symbols, timeframe=timeframe, bars=bars
-                    )
-
-                    # Validar una muestra
-                    muestra_valida = True
-                    for sym, candles in resultado_batch.items():
-                        resultado_val = validar_barras(candles, timeframe)
-                        if not resultado_val.valido:
-                            logger.warning(
-                                f"Validacion fallida intento {intento + 1}/{VALIDACION_MAX_REINTENTOS} "
-                                f"para {sym} tf={timeframe}: {resultado_val.razon}"
-                            )
-                            muestra_valida = False
-                            break
-
-                    if muestra_valida or intento == VALIDACION_MAX_REINTENTOS - 1:
-                        resultado_total.update(resultado_batch)
-                        if not muestra_valida:
-                            logger.error(
-                                f"Barras no confiables despues de {VALIDACION_MAX_REINTENTOS} "
-                                f"reintentos para tf={timeframe}. Usando datos disponibles."
-                            )
-                            self._publicar_log_validacion_fallida_batch(
-                                timeframe, len(batch_symbols)
-                            )
-                        break
-
-                    logger.info(
-                        f"Reintentando fetch en {VALIDACION_PAUSA_REINTENTO_SEGUNDOS}s..."
-                    )
-                    time.sleep(VALIDACION_PAUSA_REINTENTO_SEGUNDOS)
-
-                except Exception as e:
-                    logger.error(f"Error en batch fetch tf={timeframe} intento {intento + 1}: {e}")
-                    if intento < VALIDACION_MAX_REINTENTOS - 1:
-                        time.sleep(VALIDACION_PAUSA_REINTENTO_SEGUNDOS)
-
-        return resultado_total
-
-    def _publicar_log_validacion_fallida_batch(self, timeframe: str, num_simbolos: int) -> None:
-        """Publica log de validacion fallida a Kafka."""
-        if not self.obj_kafka_producer:
-            return
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-        self.obj_kafka_producer.publicar_log({
-            "servicioOrigen": "signal-processing-service",
-            "nivel": "ERROR",
-            "mensaje": (
-                f"Validacion de barras fallida despues de {VALIDACION_MAX_REINTENTOS} "
-                f"reintentos para tf={timeframe}, {num_simbolos} simbolos"
-            ),
-            "idEscaner": None,
-            "symbol": None,
-            "categoria": "DATA",
-            "timestamp": now,
-            "metadatos": json.dumps({
-                "timeframe": timeframe,
-                "numSimbolos": num_simbolos,
-                "reintentos": VALIDACION_MAX_REINTENTOS,
-            }),
-        })
 
     # =========================================================================
     # Evaluacion de simbolos
@@ -706,68 +525,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         )
 
     def _emitir_senal(self, escaner, symbol):
-        senal = Senal(
-            escaner_id=escaner.id_escaner,
-            escaner_nombre=escaner.nombre,
-            symbol=symbol,
-            filtros_evaluados=[f.enum_filtro for f in escaner.filtros],
-        )
-
-        logger.info("=" * 80)
-        logger.info(f"SENAL GENERADA: {symbol}")
-        logger.info(f"  Escaner: {escaner.nombre} (ID: {escaner.id_escaner})")
-        logger.info(f"  Filtros: {[f.enum_filtro for f in escaner.filtros]}")
-        logger.info("=" * 80)
-        print(senal)
-        sys.stdout.flush()
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-
-        if self.obj_kafka_producer:
-            logger.info(f"Publicando senal a Kafka para {symbol}...")
-
-            # Publicar senal
-            self.obj_kafka_producer.publicar_senal({
-                "idEscaner": escaner.id_escaner,
-                "nombreEscaner": escaner.nombre,
-                "symbol": symbol,
-                "tipoSenal": "ENTRADA",
-                "filtrosAplicados": json.dumps([f.enum_filtro for f in escaner.filtros]),
-                "precioDeteccion": None,
-                "volumenDeteccion": None,
-                "timestamp": now,
-            })
-            logger.info(f"  -> Topic 'signals': OK")
-
-            # Publicar estado activo
-            self.obj_kafka_producer.publicar_estado_activo({
-                "idEscaner": escaner.id_escaner,
-                "nombreEscaner": escaner.nombre,
-                "symbol": symbol,
-                "estado": "ACTIVO",
-                "metadatos": json.dumps({"filtros": [f.enum_filtro for f in escaner.filtros]}),
-                "timestamp": now,
-            })
-            logger.info(f"  -> Topic 'asset-state': OK")
-
-            # Publicar log
-            self.obj_kafka_producer.publicar_log({
-                "servicioOrigen": "signal-processing-service",
-                "nivel": "INFO",
-                "mensaje": f"Senal generada para {symbol} en escaner {escaner.nombre}",
-                "idEscaner": escaner.id_escaner,
-                "symbol": symbol,
-                "categoria": "SIGNAL",
-                "timestamp": now,
-                "metadatos": json.dumps({"filtros": [f.enum_filtro for f in escaner.filtros]}),
-            })
-            logger.info(f"  -> Topic 'logs': OK")
-
-            logger.info(f"Senal publicada a Kafka exitosamente para {symbol}")
-        else:
-            logger.warning("Kafka producer no disponible, senal no publicada a Kafka")
-
-        sys.stdout.flush()
+        self.notification_service.emitir_senal(escaner, symbol)
 
     def _ya_emitida(self, escaner_id, symbol):
         key = (escaner_id, symbol)

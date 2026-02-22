@@ -13,6 +13,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from domain.models.escaner import Escaner
+from domain.services.market_calendar_service import MarketCalendarService
+from domain.services.time_sync_service import TimeSyncService
 from config import (
     POLLING_INTERVAL_SECONDS,
     PRE_DESPERTAR_UMBRAL_SEGUNDOS,
@@ -26,45 +28,6 @@ INTERVALO_POR_TIMEFRAME = {
     "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
     "H1": 3600, "D1": 86400, "W1": 604800, "MO1": 2592000,
 }
-
-NYSE_TZ = ZoneInfo("America/New_York")
-HORA_CIERRE_NYSE = 16  # 4:00 PM ET
-
-# Feriados NYSE 2026 (dias completos sin mercado)
-FERIADOS_NYSE_2026 = {
-    datetime(2026, 1, 1, tzinfo=timezone.utc): "New Year's Day",
-    datetime(2026, 1, 19, tzinfo=timezone.utc): "MLK Day",
-    datetime(2026, 2, 16, tzinfo=timezone.utc): "Presidents' Day",
-    datetime(2026, 4, 3, tzinfo=timezone.utc): "Good Friday",
-    datetime(2026, 5, 25, tzinfo=timezone.utc): "Memorial Day",
-    datetime(2026, 7, 3, tzinfo=timezone.utc): "Independence Day",
-    datetime(2026, 9, 7, tzinfo=timezone.utc): "Labor Day",
-    datetime(2026, 11, 26, tzinfo=timezone.utc): "Thanksgiving",
-    datetime(2026, 12, 25, tzinfo=timezone.utc): "Christmas",
-}
-
-
-def es_dia_de_mercado() -> bool:
-    """Verifica si hoy es un día de mercado (lun-vie, sin feriados NYSE)."""
-    now = datetime.now(timezone.utc)
-    if now.weekday() >= 5:
-        return False
-    fecha_hoy = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return fecha_hoy not in FERIADOS_NYSE_2026
-
-
-def obtener_razon_mercado_cerrado() -> str:
-    """Retorna una descripción legible de por qué el mercado está cerrado."""
-    now = datetime.now(timezone.utc)
-    if now.weekday() == 5:
-        return "Mercado cerrado (Sábado)"
-    if now.weekday() == 6:
-        return "Mercado cerrado (Domingo)"
-    fecha_hoy = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    nombre = FERIADOS_NYSE_2026.get(fecha_hoy)
-    if nombre:
-        return f"Mercado cerrado (Feriado: {nombre})"
-    return "Mercado cerrado (razón desconocida)"
 
 
 class EscanerScheduler:
@@ -275,17 +238,17 @@ class EscanerScheduler:
     # =========================================================================
 
     def _ejecutar_con_validacion_mercado(self, escaner: Escaner) -> None:
-        """Wrapper: verifica que el mercado esté abierto y que la hora actual
-        esté dentro de la ventana hora_inicio-hora_fin antes de ejecutar.
-        Si el mercado está cerrado, publica 1 solo log por escaner+dia.
+        """Wrapper: verifica que el mercado este abierto y que la hora actual
+        este dentro de la ventana hora_inicio-hora_fin antes de ejecutar.
+        Si el mercado esta cerrado, publica 1 solo log por escaner+dia.
         """
-        if not es_dia_de_mercado():
+        if not MarketCalendarService.es_dia_de_mercado():
             fecha_hoy = datetime.now(timezone.utc).date()
             if self._mercado_cerrado_notificado.get(escaner.id_escaner) == fecha_hoy:
                 return  # Ya notificado hoy, no hacer nada
 
             self._mercado_cerrado_notificado[escaner.id_escaner] = fecha_hoy
-            razon = obtener_razon_mercado_cerrado()
+            razon = MarketCalendarService.obtener_razon_mercado_cerrado()
             logger.info(f"Escaner {escaner.nombre} OMITIDO: {razon}")
 
             kafka_producer = getattr(self.obj_procesar_senales_cu, 'obj_kafka_producer', None)
@@ -352,16 +315,16 @@ class EscanerScheduler:
 
     def _ejecutar_con_pre_despertar(self, escaner: Escaner, intervalo_segundos: int) -> None:
         """Pre-despertar: despierta antes de la ejecucion real, recalcula el
-        tiempo exacto hasta el cierre de la barra, duerme hasta ese momento,
-        y ejecuta el escaner.
+        tiempo exacto hasta el cierre de la barra usando TimeSyncService,
+        duerme hasta ese momento, y ejecuta el escaner.
         """
         # Validar mercado antes del pre-despertar
-        if not es_dia_de_mercado():
+        if not MarketCalendarService.es_dia_de_mercado():
             fecha_hoy = datetime.now(timezone.utc).date()
             if self._mercado_cerrado_notificado.get(escaner.id_escaner) == fecha_hoy:
                 return
             self._mercado_cerrado_notificado[escaner.id_escaner] = fecha_hoy
-            razon = obtener_razon_mercado_cerrado()
+            razon = MarketCalendarService.obtener_razon_mercado_cerrado()
             logger.info(f"Pre-despertar {escaner.nombre} OMITIDO: {razon}")
 
             kafka_producer = getattr(self.obj_procesar_senales_cu, 'obj_kafka_producer', None)
@@ -409,70 +372,11 @@ class EscanerScheduler:
             sys.stdout.flush()
             return
 
-        ts_cierre = self._calcular_proximo_cierre_barra(ahora, intervalo_segundos)
-
-        if ts_cierre is None:
-            # El cierre de la barra del dia ya ocurrio (p.ej. D1 cierra a las 16:00 ET)
-            # No hay otra barra hoy, omitir ejecucion
-            logger.info(
-                f"Pre-despertar '{escaner.nombre}': cierre de barra del dia ya ocurrio, "
-                f"omitiendo ejecucion"
-            )
-            sys.stdout.flush()
-            return
-
-        segundos_restantes = (ts_cierre - ahora).total_seconds()
-
-        if segundos_restantes <= 0:
-            logger.info(
-                f"Pre-despertar {escaner.nombre}: barra ya cerrada "
-                f"(diferencia={segundos_restantes:.1f}s), ejecutando"
-            )
+        # Sincroniza y duerme hasta el cierre exacto de la barra
+        executed = TimeSyncService.sleep_hasta_proximo_cierre(intervalo_segundos, PRE_DESPERTAR_MARGEN_SEGUNDOS)
+        
+        if executed:
             self.obj_procesar_senales_cu.ejecutar_escaner(escaner)
-            return
-
-        # Agregar margen para que DXLink tenga la barra lista
-        segundos_restantes += PRE_DESPERTAR_MARGEN_SEGUNDOS
-
-        logger.info(
-            f"Pre-despertar {escaner.nombre}: esperando {segundos_restantes:.1f}s "
-            f"hasta cierre de barra ({ts_cierre.isoformat()})"
-        )
-        sys.stdout.flush()
-
-        time_mod.sleep(segundos_restantes)
-
-        logger.info(f"Pre-despertar {escaner.nombre}: sleep completado, ejecutando escaner")
-        sys.stdout.flush()
-
-        self.obj_procesar_senales_cu.ejecutar_escaner(escaner)
-
-    @staticmethod
-    def _calcular_proximo_cierre_barra(
-        ahora: datetime, intervalo_segundos: int
-    ) -> datetime | None:
-        """Calcula el timestamp UTC del proximo cierre de barra.
-
-        Para intraday: alinea al epoch (ej: H1 cierra en :00 de cada hora).
-        Para D1: cierre NYSE a las 16:00 ET (maneja DST).
-        """
-        if intervalo_segundos >= 86400:
-            # D1: calcular cierre NYSE dinamicamente
-            ahora_ny = ahora.astimezone(NYSE_TZ)
-            cierre_hoy_ny = ahora_ny.replace(
-                hour=HORA_CIERRE_NYSE, minute=0, second=0, microsecond=0
-            )
-            if ahora_ny < cierre_hoy_ny:
-                return cierre_hoy_ny.astimezone(timezone.utc)
-            else:
-                return None  # Ya paso el cierre de hoy
-
-        # Intraday: alinear al epoch
-        epoch_seg = int(ahora.timestamp())
-        seg_en_barra = epoch_seg % intervalo_segundos
-        seg_hasta_cierre = intervalo_segundos - seg_en_barra
-
-        return ahora + timedelta(seconds=seg_hasta_cierre)
 
     # =========================================================================
     # Calculo de intervalo

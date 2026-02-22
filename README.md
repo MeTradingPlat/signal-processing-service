@@ -20,9 +20,17 @@ graph TB
         FE[FiltroExecutor<br/>AND + cortocircuito]
     end
 
+    subgraph DomainServices["Domain Component Services"]
+        TSS[TimeSyncService<br/>Sleep exacto de epoch]
+        MCS[MarketCalendarService<br/>NYSE Feriados]
+        DFS[DataFetchService<br/>Lotes & Reintentos]
+        SNS[SignalNotificationService<br/>Logs & Kafka]
+    end
+
     subgraph Output["Output Adapters"]
         CE[ComunicacionExternaAdapter<br/>HTTP REST]
         YF[YahooFinanceAdapter<br/>yahooquery]
+        KFK[KafkaProducerAdapter<br/>Emisión Asíncrona]
     end
 
     subgraph External["Servicios Externos"]
@@ -32,9 +40,12 @@ graph TB
     end
 
     SCH --> PS
+    SCH --> MCS & TSS
     EVL --> PS
+    PS --> DFS & SNS
     PS --> FE --> FR
-    PS --> CE
+    DFS --> CE
+    SNS --> KFK
     CE --> SMS & MDS
     CE --> YF --> YQ
 ```
@@ -99,19 +110,19 @@ Ambas fases deben cumplirse (AND): un simbolo que no pasa filtros de estado nunc
 
 ## Dependencias Externas
 
-| Servicio | Endpoint | Datos |
-|----------|----------|-------|
-| scanner-management-service | `GET /api/escaner` | Escaneres activos con filtros |
-| market-data-service | `GET /api/marketdata/markets` | Mercados disponibles |
-| market-data-service | `GET /api/marketdata/symbols?markets=...` | Simbolos por mercado |
-| market-data-service | `GET /api/marketdata/historical/{symbol}` | Candles OHLCV cerradas |
-| market-data-service | `GET /api/marketdata/historical/{symbol}/current` | Barra en formacion |
-| market-data-service | `GET /api/marketdata/historical/{symbol}/last` | Ultima barra cerrada |
-| market-data-service | `GET /api/marketdata/quote/{symbol}` | Quote actual |
-| market-data-service | `GET /api/marketdata/earnings/{symbol}` | Dias hasta earnings |
-| market-data-service | `POST /api/marketdata/orders` | Orden bracket (OTOCO) |
-| market-data-service | `DELETE /api/marketdata/orders/{id}` | Cancelar orden |
-| Yahoo Finance (yahooquery) | Python directo | float, shares outstanding, short interest, short ratio |
+| Servicio                   | Endpoint                                          | Datos                                                  |
+| -------------------------- | ------------------------------------------------- | ------------------------------------------------------ |
+| scanner-management-service | `GET /api/escaner`                                | Escaneres activos con filtros                          |
+| market-data-service        | `GET /api/marketdata/markets`                     | Mercados disponibles                                   |
+| market-data-service        | `GET /api/marketdata/symbols?markets=...`         | Simbolos por mercado                                   |
+| market-data-service        | `GET /api/marketdata/historical/{symbol}`         | Candles OHLCV cerradas                                 |
+| market-data-service        | `GET /api/marketdata/historical/{symbol}/current` | Barra en formacion                                     |
+| market-data-service        | `GET /api/marketdata/historical/{symbol}/last`    | Ultima barra cerrada                                   |
+| market-data-service        | `GET /api/marketdata/quote/{symbol}`              | Quote actual                                           |
+| market-data-service        | `GET /api/marketdata/earnings/{symbol}`           | Dias hasta earnings                                    |
+| market-data-service        | `POST /api/marketdata/orders`                     | Orden bracket (OTOCO)                                  |
+| market-data-service        | `DELETE /api/marketdata/orders/{id}`              | Cancelar orden                                         |
+| Yahoo Finance (yahooquery) | Python directo                                    | float, shares outstanding, short interest, short ratio |
 
 ## Estructura
 
@@ -132,12 +143,17 @@ signal-processing-service/
 ├── domain/
 │   ├── enums/                       # EnumFiltro, EnumParametro, etc.
 │   ├── models/                      # Escaner, Candle, Senal, DatosFundamentales
+│   ├── services/                    # Componentes modulares
+│   │   ├── time_sync_service.py     # Sleep epoch-exacto
+│   │   ├── market_calendar_service.py # Feriados NYSE
+│   │   ├── data_fetch_service.py    # Batch fetcher con reintentos
+│   │   └── signal_notification_service.py
 │   └── usecases/
-│       └── procesar_senales_cu_adapter.py   # 2 fases + deduplicacion
+│       └── procesar_senales_cu_adapter.py   # Orquestador (2 fases + deduplicacion)
 └── infrastructure/
     ├── input/
     │   ├── scheduler/
-    │   │   ├── escaner_scheduler.py         # APScheduler (60s)
+    │   │   ├── escaner_scheduler.py         # Programador delegando a TimeSync
     │   │   └── event_loop_scheduler.py      # Thread daemon (0.1s)
     │   └── api/
     │       └── fastapi_controller.py        # Webhooks POST/DELETE
@@ -164,17 +180,17 @@ signal-processing-service/
 
 Todas las variables son configurables via variables de entorno (para Docker/prod):
 
-| Variable | Default | Descripcion |
-|----------|---------|-------------|
-| `SCANNER_SERVICE_URL` | `http://localhost:8080/api` | URL del scanner-management-service |
-| `MARKETDATA_SERVICE_URL` | `http://localhost:8080/api` | URL del market-data-service |
-| `MAX_WORKERS_ESCANERES` | `10` | Hilos para escaneres en paralelo |
-| `MAX_WORKERS_SIMBOLOS` | `20` | Hilos para simbolos en paralelo |
-| `REQUEST_TIMEOUT` | `30` | Timeout HTTP en segundos |
-| `POLLING_INTERVAL_SECONDS` | `60` | Intervalo del scheduler (fase 1) |
-| `EVENT_POLLING_INTERVAL_SECONDS` | `0.1` | Intervalo del event loop (fase 2) |
-| `MAX_SYMBOLS_REALTIME` | `50` | Tope de simbolos en watchlist |
-| `SIGNAL_COOLDOWN_SECONDS` | `300` | Cooldown entre senales duplicadas |
+| Variable                         | Default                     | Descripcion                        |
+| -------------------------------- | --------------------------- | ---------------------------------- |
+| `SCANNER_SERVICE_URL`            | `http://localhost:8080/api` | URL del scanner-management-service |
+| `MARKETDATA_SERVICE_URL`         | `http://localhost:8080/api` | URL del market-data-service        |
+| `MAX_WORKERS_ESCANERES`          | `10`                        | Hilos para escaneres en paralelo   |
+| `MAX_WORKERS_SIMBOLOS`           | `20`                        | Hilos para simbolos en paralelo    |
+| `REQUEST_TIMEOUT`                | `30`                        | Timeout HTTP en segundos           |
+| `POLLING_INTERVAL_SECONDS`       | `60`                        | Intervalo del scheduler (fase 1)   |
+| `EVENT_POLLING_INTERVAL_SECONDS` | `0.1`                       | Intervalo del event loop (fase 2)  |
+| `MAX_SYMBOLS_REALTIME`           | `50`                        | Tope de simbolos en watchlist      |
+| `SIGNAL_COOLDOWN_SECONDS`        | `300`                       | Cooldown entre senales duplicadas  |
 
 ## Ejecucion Local
 

@@ -8,7 +8,7 @@ Provee datos que TastyTrade API no ofrece:
 import logging
 from threading import Lock
 
-from yahooquery import Ticker
+# from yahooquery import Ticker  # Mover a lazy load en obtener_datos_fundamentales
 
 from domain.models.datos_fundamentales import DatosFundamentales
 
@@ -31,6 +31,7 @@ class YahooFinanceAdapter:
                 return self._cache[symbol]
 
         try:
+            from yahooquery import Ticker
             ticker = Ticker(symbol)
             stats = ticker.key_stats
 

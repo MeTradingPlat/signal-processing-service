@@ -452,6 +452,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
     def evaluar_evento(self, escaner, symbol, event_filters, candles_cache,
                        datos_fundamentales, barras_en_formacion):
         """Evalua filtros de evento usando la barra en formacion del market-data-service."""
+        any_changed = False
         candles_con_barra = {}
         for tf, candles in candles_cache.items():
             if not candles:
@@ -465,17 +466,21 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                         and barra.low == ultima_cache.low
                         and barra.close == ultima_cache.close
                         and barra.volume == ultima_cache.volume):
-                    logger.debug(
-                        f"Barra en formacion identica al cache para {symbol} tf={tf}, "
-                        f"saltando evaluacion"
-                    )
+                    logger.debug(f"Barra identica al cache para {symbol} tf={tf}")
                     candles_con_barra[tf] = candles
                     continue
+                
+                # Marco que hubo cambios
+                any_changed = True
                 modified = list(candles)
                 modified[-1] = barra
                 candles_con_barra[tf] = modified
             else:
                 candles_con_barra[tf] = candles
+
+        if not any_changed:
+            logger.debug(f"Saltando ejecucion de filtros para {symbol}: no hay cambios en la barra en formacion")
+            return
 
         resultado = self.obj_filtro_executor.ejecutar_filtros(
             filtros=event_filters,

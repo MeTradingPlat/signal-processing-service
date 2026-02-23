@@ -142,9 +142,39 @@ logger.info("=" * 60)
 sys.stdout.flush()
 
 
+def wait_for_gateway(url: str, timeout_seconds: int = 60):
+    """Espera a que el Gateway este disponible antes de continuar."""
+    import time
+    import requests
+    
+    health_url = f"{url.rstrip('/')}/health"
+    start_time = time.time()
+    logger.info(f"Esperando a que el Gateway este listo en {health_url}...")
+    
+    while time.time() - start_time < timeout_seconds:
+        try:
+            # Intentar health check simple
+            response = requests.get(health_url, timeout=2)
+            if response.status_code == 200:
+                logger.info("Gateway detectado y responde OK")
+                return True
+        except Exception:
+            pass
+        
+        logger.debug("Gateway no disponible, reintentando en 2s...")
+        time.sleep(2)
+        
+    logger.warning("Gateway no detectado despues del tiempo de espera. Continuando de todos modos...")
+    return False
+
+
 def main():
     logger.info("Iniciando funcion main()...")
     sys.stdout.flush()
+
+    # --- Resiliencia inicial ---
+    from config import SCANNER_SERVICE_URL
+    wait_for_gateway(SCANNER_SERVICE_URL)
 
     # --- Composicion de dependencias ---
     logger.info("PASO 1: Creando YahooFinanceAdapter...")

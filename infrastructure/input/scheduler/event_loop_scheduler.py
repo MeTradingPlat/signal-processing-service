@@ -57,6 +57,14 @@ class EventLoopScheduler(threading.Thread):
             f"max_simbolos={MAX_SYMBOLS_REALTIME})"
         )
         while self._running:
+            # Si el watchlist esta vacio, dormir mas tiempo para ahorrar CPU
+            with self._lock:
+                empty = len(self._watchlist) == 0
+
+            if empty:
+                time.sleep(5)
+                continue
+
             start = time.monotonic()
             try:
                 self._tick()

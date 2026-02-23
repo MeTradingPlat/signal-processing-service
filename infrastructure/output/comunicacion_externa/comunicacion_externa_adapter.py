@@ -355,6 +355,7 @@ class ComunicacionExternaAdapter(ComunicacionExternaIntPort):
                 enum_tipo_valor=tipo,
                 valor1=float(data.get("valor1", 0)),
                 valor2=float(data.get("valor2", 0)),
+                enum_condicional=data.get("enumCondicional", ""),
             )
         elif tipo == "FLOAT":
             return ValorFloat(

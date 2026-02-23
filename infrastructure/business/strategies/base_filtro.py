@@ -46,10 +46,24 @@ class BaseFiltro(ABC):
         return None
 
     def _obtener_valor_condicional(self, filtro: Filtro, enum_parametro: str = "CONDICION"):
-        """Helper: obtiene valor1 y valor2 de un parametro condicional."""
+        """Helper: obtiene valor1 y valor2 de un parametro condicional, 
+        ajustando los limites segun la operacion (Smart Range)."""
         valor = self._obtener_valor_parametro(filtro, enum_parametro)
-        if valor and hasattr(valor, "valor1") and hasattr(valor, "valor2"):
-            return valor.valor1, valor.valor2
+        if isinstance(valor, ValorCondicional):
+            op = valor.enum_condicional
+            v1 = valor.valor1
+            v2 = valor.valor2
+            
+            if op == "MAYOR_QUE":
+                return v1, float('inf')
+            elif op == "MENOR_QUE":
+                return float('-inf'), v1
+            elif op == "IGUAL_A":
+                return v1, v1
+            
+            # Para ENTRE (o si no hay operacion definida), devolvemos el rango normal
+            return v1, v2
+            
         return None, None
 
     def _obtener_valor_string(self, filtro: Filtro, enum_parametro: str) -> str:

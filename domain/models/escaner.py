@@ -13,6 +13,7 @@ class Valor:
 class ValorCondicional(Valor):
     valor1: float = 0.0
     valor2: float = 0.0
+    enum_condicional: str = ""
 
 
 @dataclass

@@ -16,13 +16,9 @@ class FiltroPrecio(BaseFiltro):
         if not candles:
             return False
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return False
-
         precio = candles[-1].close
-        resultado = self._evaluar_condicion(precio, min_val, max_val)
-        logger.debug(f"PRECIO: precio={precio} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(precio, filtro)
+        logger.debug(f"PRECIO: precio={precio} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

@@ -66,6 +66,30 @@ class BaseFiltro(ABC):
             
         return None, None
 
+    def _evaluar_condicion_completa(self, valor_a_testear: float, filtro: Filtro, enum_parametro: str = "CONDICION") -> bool:
+        """
+        Evalua un valor contra la condicion configurada, soportando todos los operadores.
+        """
+        valor_obj = self._obtener_valor_parametro(filtro, enum_parametro)
+        if not isinstance(valor_obj, ValorCondicional):
+            return False
+            
+        op = valor_obj.enum_condicional
+        v1 = valor_obj.valor1
+        v2 = valor_obj.valor2
+        
+        if op == "MAYOR_QUE":
+            return valor_a_testear > v1
+        elif op == "MENOR_QUE":
+            return valor_a_testear < v1
+        elif op == "IGUAL_A":
+            return valor_a_testear == v1
+        elif op == "FUERA":
+            return valor_a_testear < v1 or valor_a_testear > v2
+        else:
+            # Por defecto: ENTRE
+            return v1 <= valor_a_testear <= v2
+
     def _obtener_valor_string(self, filtro: Filtro, enum_parametro: str) -> str:
         """Helper: obtiene el string de un parametro."""
         valor = self._obtener_valor_parametro(filtro, enum_parametro)

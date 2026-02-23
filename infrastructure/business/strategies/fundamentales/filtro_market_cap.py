@@ -17,12 +17,9 @@ class FiltroMarketCap(BaseFiltro):
             logger.debug("MARKET_CAP: sin datos fundamentales disponibles")
             return True
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return True
-
-        resultado = self._evaluar_condicion(datos_fundamentales.market_cap, min_val, max_val)
-        logger.debug(f"MARKET_CAP: val={datos_fundamentales.market_cap} rango=[{min_val}, {max_val}] -> {resultado}")
+        val = datos_fundamentales.market_cap
+        resultado = self._evaluar_condicion_completa(val, filtro)
+        logger.debug(f"MARKET_CAP: val={val} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

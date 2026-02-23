@@ -142,14 +142,14 @@ logger.info("=" * 60)
 sys.stdout.flush()
 
 
-def wait_for_gateway(url: str, timeout_seconds: int = 60):
+def wait_for_gateway(url: str, timeout_seconds: int = 240):
     """Espera a que el Gateway este disponible antes de continuar."""
     import time
     import requests
     
     health_url = f"{url.rstrip('/')}/health"
     start_time = time.time()
-    logger.info(f"Esperando a que el Gateway este listo en {health_url}...")
+    logger.info(f"Esperando a que el Gateway este listo en {health_url} (timeout {timeout_seconds}s)...")
     
     while time.time() - start_time < timeout_seconds:
         try:

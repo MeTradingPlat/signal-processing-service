@@ -17,12 +17,9 @@ class FiltroSharesOutstanding(BaseFiltro):
             logger.debug("SHARES_OUTSTANDING: sin datos fundamentales disponibles")
             return True
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return True
-
-        resultado = self._evaluar_condicion(datos_fundamentales.shares_outstanding, min_val, max_val)
-        logger.debug(f"SHARES_OUTSTANDING: val={datos_fundamentales.shares_outstanding} rango=[{min_val}, {max_val}] -> {resultado}")
+        val = datos_fundamentales.shares_outstanding
+        resultado = self._evaluar_condicion_completa(val, filtro)
+        logger.debug(f"SHARES_OUTSTANDING: val={val} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

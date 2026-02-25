@@ -23,9 +23,8 @@ class FiltroRangeDollars(BaseFiltro):
         high = max(c.high for c in candles)
         low = min(c.low for c in candles)
         rango = high - low
-
-        resultado = self._evaluar_condicion(rango, min_val, max_val)
-        logger.debug(f"RANGE_DOLLARS: rango=${rango:.2f} cond=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(rango, filtro)
+        logger.debug(f"RANGE_DOLLARS: rango=${rango:.2f} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

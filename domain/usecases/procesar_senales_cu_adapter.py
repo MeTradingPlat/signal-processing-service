@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -11,9 +12,9 @@ from application.input.procesar_senales_cu_int_port import ProcesarSenalesCUIntP
 from application.output.comunicacion_externa_int_port import ComunicacionExternaIntPort
 from application.output.kafka_producer_int_port import KafkaProducerIntPort
 from domain.models.escaner import Escaner
-from domain.models.senal import Senal
 from domain.services.signal_notification_service import SignalNotificationService
 from domain.services.data_fetch_service import DataFetchService
+from domain.services.time_sync_service import TimeSyncService
 from config import (
     MAX_WORKERS_SIMBOLOS,
     SIGNAL_COOLDOWN_SECONDS,
@@ -24,6 +25,11 @@ logger = logging.getLogger(__name__)
 MINUTOS_POR_VELA = {
     "M1": 1, "M5": 5, "M15": 15, "M30": 30,
     "H1": 60, "D1": 1440, "W1": 10080, "MO1": 43200,
+}
+
+INTERVALO_POR_TIMEFRAME = {
+    "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+    "H1": 3600, "D1": 86400, "W1": 604800, "MO1": 2592000,
 }
 
 
@@ -44,6 +50,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         self.obj_scheduler = None
         self.obj_event_loop = None
         self._senales_emitidas = {}
+        self._lock_senales = threading.Lock()
 
         self.notification_service = SignalNotificationService(self.obj_kafka_producer)
         self.data_fetch_service = DataFetchService(self.obj_comunicacion_externa, self.obj_candle_cache, self.notification_service)
@@ -133,6 +140,73 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
             self.obj_candle_cache.limpiar_escaner(id_escaner)
         logger.info(f"Escaner {id_escaner} detenido OK")
         sys.stdout.flush()
+
+    # =========================================================================
+    # Sesion diaria (loop hasta hora_fin)
+    # =========================================================================
+
+    def ejecutar_sesion(self, escaner: Escaner) -> None:
+        """Ejecuta la sesion completa del dia: llama ejecutar_escaner en cada cierre
+        de barra hasta que se alcanza hora_fin.
+
+        Responsabilidad del CU, no del scheduler. El scheduler solo decide cuando
+        arrancar (hora_inicio). Esta funcion decide cuando terminar (hora_fin) y
+        cada cuanto repetir (intervalo del timeframe mas pequeno).
+        """
+        logger.info(
+            f"Iniciando sesion DIARIA: '{escaner.nombre}' "
+            f"({escaner.hora_inicio}-{escaner.hora_fin} UTC)"
+        )
+        sys.stdout.flush()
+
+        intervalo = self._calcular_intervalo_sesion(escaner)
+        hora_fin_parts = escaner.hora_fin.split(":")
+        from datetime import time as dt_time
+        hora_fin_t = dt_time(int(hora_fin_parts[0]), int(hora_fin_parts[1]))
+
+        while True:
+            ahora_time = datetime.now(timezone.utc).time()
+            if ahora_time >= hora_fin_t:
+                logger.info(
+                    f"Sesion '{escaner.nombre}': hora_fin alcanzada "
+                    f"({escaner.hora_fin} UTC), terminando"
+                )
+                break
+
+            self.ejecutar_escaner(escaner)
+
+            # Verificar nuevamente tras la ejecucion (puede haber tardado varios minutos)
+            ahora_time = datetime.now(timezone.utc).time()
+            if ahora_time >= hora_fin_t:
+                break
+
+            # Dormir hasta el proximo cierre de barra
+            continuar = TimeSyncService.sleep_hasta_proximo_cierre(intervalo, margen_segundos=0)
+            if not continuar:
+                # Cierre de barra del dia ya ocurrio (ej: D1 tras cierre NYSE)
+                logger.info(f"Sesion '{escaner.nombre}': cierre de barra del dia ya ocurrio, terminando")
+                break
+
+        logger.info(f"Sesion '{escaner.nombre}' finalizada")
+        sys.stdout.flush()
+
+    def _calcular_intervalo_sesion(self, escaner: Escaner) -> int:
+        """Devuelve el intervalo en segundos del timeframe mas pequeno del escaner."""
+        try:
+            timeframes = self.obj_filtro_executor.obtener_timeframes_necesarios(escaner.filtros)
+            if not timeframes:
+                return 300
+
+            min_intervalo = None
+            for tf in timeframes:
+                intervalo = INTERVALO_POR_TIMEFRAME.get(tf)
+                if intervalo is not None:
+                    min_intervalo = intervalo if min_intervalo is None else min(min_intervalo, intervalo)
+
+            return max(60, min_intervalo) if min_intervalo is not None else 300
+        except Exception as e:
+            logger.error(f"Error calculando intervalo sesion para '{escaner.nombre}': {e}")
+            return 300
 
     # =========================================================================
     # Ejecucion principal del escaner
@@ -535,12 +609,13 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
     def _ya_emitida(self, escaner_id, symbol):
         key = (escaner_id, symbol)
         now = time.time()
-        if key in self._senales_emitidas:
-            if (now - self._senales_emitidas[key]) < SIGNAL_COOLDOWN_SECONDS:
-                logger.debug(f"Senal ya emitida recientemente para {symbol}, cooldown activo")
-                return True
-        self._senales_emitidas[key] = now
-        return False
+        with self._lock_senales:
+            if key in self._senales_emitidas:
+                if (now - self._senales_emitidas[key]) < SIGNAL_COOLDOWN_SECONDS:
+                    logger.debug(f"Senal ya emitida recientemente para {symbol}, cooldown activo")
+                    return True
+            self._senales_emitidas[key] = now
+            return False
 
     def _publicar_log_inicio_escaner(self, escaner: Escaner, simbolos: list[str]) -> None:
         """Publica log detallado al iniciar la ejecucion de un escaner."""

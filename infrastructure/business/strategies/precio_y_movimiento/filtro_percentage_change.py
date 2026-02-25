@@ -27,9 +27,8 @@ class FiltroPercentageChange(BaseFiltro):
             return False
 
         pct_change = ((precio_actual - precio_inicial) / precio_inicial) * 100
-
-        resultado = self._evaluar_condicion(pct_change, min_val, max_val)
-        logger.debug(f"PERCENTAGE_CHANGE: pct={pct_change:.2f}% rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(pct_change, filtro)
+        logger.debug(f"PERCENTAGE_CHANGE: pct={pct_change:.2f}% -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

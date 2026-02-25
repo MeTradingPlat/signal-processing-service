@@ -27,8 +27,8 @@ class FiltroRSI(BaseFiltro):
         if rsi is None:
             return False
 
-        resultado = self._evaluar_condicion(rsi, min_val, max_val)
-        logger.debug(f"RSI: rsi={rsi:.2f} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(rsi, filtro)
+        logger.debug(f"RSI: rsi={rsi:.2f} -> {resultado}")
         return resultado
 
     @staticmethod

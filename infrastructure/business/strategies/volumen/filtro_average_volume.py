@@ -15,18 +15,13 @@ class FiltroAverageVolume(BaseFiltro):
     DEFAULT_PERIODO = 20
 
     def evaluar(self, candles: list[Candle], filtro: Filtro, datos_fundamentales: DatosFundamentales | None = None) -> bool:
-        if len(candles) < 2:
-            return False
-
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
+        if len(candles) < 1:
             return False
 
         volumes = [c.volume for c in candles]
         avg_volume = sum(volumes) / len(volumes)
-
-        resultado = self._evaluar_condicion(avg_volume, min_val, max_val)
-        logger.debug(f"AVERAGE_VOLUME: avg={avg_volume:.0f} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(avg_volume, filtro)
+        logger.debug(f"AVERAGE_VOLUME: avg={avg_volume:.0f} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

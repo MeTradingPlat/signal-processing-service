@@ -41,9 +41,8 @@ class FiltroATRP(BaseFiltro):
             return False
 
         atrp = (atr / precio) * 100
-
-        resultado = self._evaluar_condicion(atrp, min_val, max_val)
-        logger.debug(f"ATRP: atrp={atrp:.2f}% rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(atrp, filtro)
+        logger.debug(f"ATRP: atrp={atrp:.2f}% -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

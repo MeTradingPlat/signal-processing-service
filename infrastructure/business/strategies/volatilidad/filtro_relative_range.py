@@ -28,9 +28,8 @@ class FiltroRelativeRange(BaseFiltro):
             return False
 
         relative_range = (rango_actual / avg_rango) * 100
-
-        resultado = self._evaluar_condicion(relative_range, min_val, max_val)
-        logger.debug(f"RELATIVE_RANGE: rr={relative_range:.1f}% rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(relative_range, filtro)
+        logger.debug(f"RELATIVE_RANGE: rr={relative_range:.1f}% -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

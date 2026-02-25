@@ -28,9 +28,8 @@ class FiltroRelativeVolume(BaseFiltro):
             return False
 
         rvol = (vol_actual / avg_vol) * 100
-
-        resultado = self._evaluar_condicion(rvol, min_val, max_val)
-        logger.debug(f"RELATIVE_VOLUME: rvol={rvol:.1f}% rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(rvol, filtro)
+        logger.debug(f"RELATIVE_VOLUME: rvol={rvol:.1f}% -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

@@ -3,7 +3,6 @@
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 from config import EVENT_POLLING_INTERVAL_SECONDS, MAX_SYMBOLS_REALTIME
 
@@ -26,6 +25,10 @@ class EventLoopScheduler(threading.Thread):
         self, escaner_id, symbol, escaner, event_filters, candles_cache, datos_fundamentales=None
     ):
         """Registra un simbolo para monitoreo en tiempo real."""
+        # Pre-computar timeframes fuera del lock (es calculo puro, sin I/O)
+        timeframes_necesarios = self.obj_procesar_senales.obj_filtro_executor.obtener_timeframes_necesarios(
+            escaner.filtros
+        )
         with self._lock:
             if len(self._watchlist) >= MAX_SYMBOLS_REALTIME:
                 logger.warning(
@@ -38,6 +41,8 @@ class EventLoopScheduler(threading.Thread):
                 "event_filters": event_filters,
                 "candles_cache": candles_cache,
                 "datos_fundamentales": datos_fundamentales,
+                # Cacheado al momento de registro para no recomputar en cada tick
+                "timeframes_necesarios": timeframes_necesarios,
             }
 
     def remover_de_watchlist(self, escaner_id, symbol=None):
@@ -84,12 +89,8 @@ class EventLoopScheduler(threading.Thread):
 
         symbols_timeframes = {}
         for (esc_id, symbol), entry in items:
-            # Obtener TODOS los timeframes requeridos (Event + State)
-            # Para asegurar que detectamos cierre de velas en timeframes de estado
-            esc = entry["escaner"]
-            timeframes_necesarios = self.obj_procesar_senales.obj_filtro_executor.obtener_timeframes_necesarios(esc.filtros)
-            
-            for tf in timeframes_necesarios.keys():
+            # Usar timeframes pre-computados al registrar en watchlist (evita recomputo por tick)
+            for tf in entry["timeframes_necesarios"].keys():
                 key = (symbol, tf)
                 if key not in symbols_timeframes:
                     symbols_timeframes[key] = None
@@ -134,59 +135,58 @@ class EventLoopScheduler(threading.Thread):
         """
         Solicita ULTIMA barra cerrada y actualiza cache.
         Ademas, RE-EVALUA filtros de estado. Si fallan, remueve del watchlist.
+
+        Las llamadas HTTP se hacen FUERA del lock para no bloquear el watchlist
+        durante el timeout de red (hasta 30s). Solo la actualizacion del cache
+        (operacion en memoria) ocurre dentro del lock.
         """
         tf_to_symbols = {}
         for (sym, tf) in cambio_de_barra:
-            if tf not in tf_to_symbols:
-                tf_to_symbols[tf] = set()
-            tf_to_symbols[tf].add(sym)
+            tf_to_symbols.setdefault(tf, set()).add(sym)
 
+        # 1. HTTP calls fuera del lock — la parte lenta (hasta 30s por timeout)
+        resultados_por_tf = {}
+        for tf, symbols in tf_to_symbols.items():
+            list_symbols = list(symbols)
+            logger.debug(f"Refresh batch LAST tf={tf}: {len(list_symbols)} symbols")
+            try:
+                nuevas_data = self.obj_procesar_senales.obj_comunicacion_externa.obtener_ultima_barra_completa_batch(
+                    symbols=list_symbols,
+                    timeframe=tf
+                )
+                resultados_por_tf[tf] = nuevas_data
+            except Exception as e:
+                logger.error(f"Error refreshing batch last candles for tf={tf}: {e}")
+                resultados_por_tf[tf] = {}
+
+        # 2. Actualizar cache y re-evaluar dentro del lock (solo operaciones en memoria)
         to_remove = set()
-
         with self._lock:
-            for tf, symbols in tf_to_symbols.items():
-                list_symbols = list(symbols)
-                logger.debug(f"Refresh batch LAST tf={tf}: {len(list_symbols)} symbols")
-                try:
-                    nuevas_data = self.obj_procesar_senales.obj_comunicacion_externa.obtener_ultima_barra_completa_batch(
-                        symbols=list_symbols,
-                        timeframe=tf
-                    )
-                    
-                    for (esc_id, symbol), entry in self._watchlist.items():
-                        # Actualizar cache si corresponde
-                        if symbol in nuevas_data and tf in entry["candles_cache"]:
-                            nueva_vela = nuevas_data[symbol]
-                            cache = entry["candles_cache"][tf]
-                            
-                            updated = False
-                            if not cache or nueva_vela.timestamp != cache[-1].timestamp:
-                                cache.append(nueva_vela)
-                                if len(cache) > 500:
-                                    entry["candles_cache"][tf] = cache[-500:]
-                                updated = True
-                                logger.debug(f"Cache actualizado para {symbol} tf={tf}")
+            for tf, nuevas_data in resultados_por_tf.items():
+                for (esc_id, symbol), entry in self._watchlist.items():
+                    if symbol not in nuevas_data or tf not in entry["candles_cache"]:
+                        continue
+                    nueva_vela = nuevas_data[symbol]
+                    cache = entry["candles_cache"][tf]
 
-                            # Si se actualizo el cache de un timeframe usado por filtros de estado, re-evaluar
-                            if updated:
-                                sigue_valido = self.obj_procesar_senales.re_evaluar_fase1(
-                                    escaner=entry["escaner"],
-                                    simbolo=symbol,
-                                    candles_cache=entry["candles_cache"],
-                                    datos_fundamentales=entry["datos_fundamentales"]
-                                )
-                                if not sigue_valido:
-                                    logger.info(f"Removiendo {symbol} de watchlist por fallo en re-evaluacion estado")
-                                    to_remove.add((esc_id, symbol))
+                    if not cache or nueva_vela.timestamp != cache[-1].timestamp:
+                        cache.append(nueva_vela)
+                        if len(cache) > 500:
+                            entry["candles_cache"][tf] = cache[-500:]
+                        logger.debug(f"Cache actualizado para {symbol} tf={tf}")
 
-                except Exception as e:
-                    logger.error(f"Error refreshing batch last candles for tf={tf}: {e}")
+                        sigue_valido = self.obj_procesar_senales.re_evaluar_fase1(
+                            escaner=entry["escaner"],
+                            simbolo=symbol,
+                            candles_cache=entry["candles_cache"],
+                            datos_fundamentales=entry["datos_fundamentales"]
+                        )
+                        if not sigue_valido:
+                            logger.info(f"Removiendo {symbol} de watchlist por fallo en re-evaluacion estado")
+                            to_remove.add((esc_id, symbol))
 
-            # Remover los que fallaron la re-evaluacion
-            if to_remove:
-                for key_rem in to_remove:
-                    self._watchlist.pop(key_rem, None)
-                    logger.info(f"Removido de watchlist: {key_rem}")
+            for key_rem in to_remove:
+                self._watchlist.pop(key_rem, None)
 
     def _fetch_barras_batch(self, symbols_timeframes):
         """Obtiene barras en formacion usando los nuevos endpoints de BATCH, agrupando por timeframe."""

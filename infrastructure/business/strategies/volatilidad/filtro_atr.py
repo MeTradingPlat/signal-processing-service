@@ -36,8 +36,8 @@ class FiltroATR(BaseFiltro):
             return False
 
         atr = atr_values[-1]
-        resultado = self._evaluar_condicion(atr, min_val, max_val)
-        logger.debug(f"ATR: atr={atr:.4f} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(atr, filtro)
+        logger.debug(f"ATR: atr={atr:.4f} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

@@ -2,10 +2,11 @@
 
 import logging
 import time
-from domain.usecases.validador_barras import validar_barras
+from datetime import datetime, timedelta, timezone
+from domain.usecases.validador_barras import validar_barras, INTERVALO_POR_TIMEFRAME
 from domain.models.escaner import Escaner
 from application.output.comunicacion_externa_int_port import ComunicacionExternaIntPort
-from config import VALIDACION_MAX_REINTENTOS, VALIDACION_PAUSA_REINTENTO_SEGUNDOS
+from config import VALIDACION_MAX_REINTENTOS
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +126,43 @@ class DataFetchService:
                                 )
                         break
 
-                    logger.info(f"Reintentando fetch en {VALIDACION_PAUSA_REINTENTO_SEGUNDOS}s...")
-                    time.sleep(VALIDACION_PAUSA_REINTENTO_SEGUNDOS)
+                    espera = self._calcular_espera_reintento(timeframe)
+                    logger.info(f"Reintentando fetch en {espera:.1f}s...")
+                    time.sleep(espera)
 
                 except Exception as e:
                     logger.error(f"Error en batch fetch tf={timeframe} intento {intento + 1}: {e}")
                     if intento < VALIDACION_MAX_REINTENTOS - 1:
-                        time.sleep(VALIDACION_PAUSA_REINTENTO_SEGUNDOS)
+                        espera = self._calcular_espera_reintento(timeframe)
+                        time.sleep(espera)
 
         return resultado_total
+
+    def _calcular_espera_reintento(self, timeframe: str) -> float:
+        """Calcula cuantos segundos esperar antes de reintentar la obtencion de barras.
+
+        Logica:
+        - Calcula cuando cierra la barra que se espera (cierre = inicio_barra_actual).
+        - Si ya paso el cierre (falta <= 0): el proveedor aun no publico la barra -> esperar 1 seg.
+        - Si falta tiempo para el cierre (falta > 0): esperar hasta el cierre + 1 seg.
+        """
+        if timeframe in ("D1", "W1", "MO1"):
+            return 1.0
+
+        intervalo = INTERVALO_POR_TIMEFRAME.get(timeframe)
+        if intervalo is None:
+            return 1.0
+
+        ahora = datetime.now(timezone.utc)
+        epoch_seg = ahora.timestamp()
+        seg_en_barra = epoch_seg % intervalo
+        # El cierre de la ultima barra = inicio de la barra actual
+        ts_cierre_ultima = ahora - timedelta(seconds=seg_en_barra)
+        falta = (ts_cierre_ultima - ahora).total_seconds()  # siempre <= 0 si ya paso
+
+        if falta <= 0:
+            # Cierre ya paso, el proveedor deberia tener la barra — esperar 1 seg
+            return 1.0
+        else:
+            # Barra aun no ha cerrado — esperar hasta el cierre + 1 seg
+            return falta + 1.0

@@ -16,15 +16,9 @@ class FiltroVolume(BaseFiltro):
         if not candles:
             return False
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return False
-
-        ultima_vela = candles[-1]
-        volumen = ultima_vela.volume
-
-        resultado = self._evaluar_condicion(volumen, min_val, max_val)
-        logger.debug(f"VOLUME: vol={volumen} rango=[{min_val}, {max_val}] -> {resultado}")
+        volumen = candles[-1].volume
+        resultado = self._evaluar_condicion_completa(volumen, filtro)
+        logger.debug(f"VOLUME: vol={volumen} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

@@ -12,7 +12,7 @@ import os
 
 # Configurar logging ANTES de cualquier import para capturar errores de importacion
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,  # Forzar salida a stdout
@@ -142,7 +142,7 @@ logger.info("=" * 60)
 sys.stdout.flush()
 
 
-def wait_for_gateway(url: str, timeout_seconds: int = 240):
+def wait_for_gateway(url: str, timeout_seconds: int = 600):
     """Espera a que el Gateway este disponible antes de continuar."""
     import time
     import requests

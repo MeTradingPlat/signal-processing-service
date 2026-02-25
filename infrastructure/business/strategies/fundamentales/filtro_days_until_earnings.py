@@ -17,12 +17,9 @@ class FiltroDaysUntilEarnings(BaseFiltro):
             logger.debug("DAYS_UNTIL_EARNINGS: sin datos fundamentales disponibles")
             return True
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return True
-
-        resultado = self._evaluar_condicion(float(datos_fundamentales.days_until_earnings), min_val, max_val)
-        logger.debug(f"DAYS_UNTIL_EARNINGS: val={datos_fundamentales.days_until_earnings} rango=[{min_val}, {max_val}] -> {resultado}")
+        val = float(datos_fundamentales.days_until_earnings)
+        resultado = self._evaluar_condicion_completa(val, filtro)
+        logger.debug(f"DAYS_UNTIL_EARNINGS: val={val} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

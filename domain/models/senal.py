@@ -1,7 +1,7 @@
 """Modelo de dominio: Senal (resultado de evaluacion de un escaner)."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -10,7 +10,7 @@ class Senal:
     escaner_nombre: str
     symbol: str
     filtros_evaluados: list[str] = field(default_factory=list)
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def __str__(self) -> str:
         return (

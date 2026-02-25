@@ -29,13 +29,12 @@ class FiltroChange(BaseFiltro):
         if punto_ref == "OPEN":
             precio_referencia = candles[-1].open
 
+        cambio = precio_actual - precio_referencia
         if tipo_medida == "PORCENTAJE" and precio_referencia != 0:
-            cambio = ((precio_actual - precio_referencia) / precio_referencia) * 100
-        else:
-            cambio = precio_actual - precio_referencia
+            cambio = (cambio / precio_referencia) * 100
 
-        resultado = self._evaluar_condicion(cambio, min_val, max_val)
-        logger.debug(f"CHANGE: cambio={cambio:.4f} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(cambio, filtro)
+        logger.debug(f"CHANGE: cambio={cambio:.4f} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

@@ -17,12 +17,9 @@ class FiltroShortRatio(BaseFiltro):
             logger.debug("SHORT_RATIO: sin datos fundamentales disponibles")
             return True
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return True
-
-        resultado = self._evaluar_condicion(datos_fundamentales.short_ratio, min_val, max_val)
-        logger.debug(f"SHORT_RATIO: val={datos_fundamentales.short_ratio} rango=[{min_val}, {max_val}] -> {resultado}")
+        val = datos_fundamentales.short_ratio
+        resultado = self._evaluar_condicion_completa(val, filtro)
+        logger.debug(f"SHORT_RATIO: val={val} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

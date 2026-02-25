@@ -29,9 +29,8 @@ class FiltroPositionInRange(BaseFiltro):
             return False
 
         posicion = ((precio_actual - low) / rango) * 100
-
-        resultado = self._evaluar_condicion(posicion, min_val, max_val)
-        logger.debug(f"POSITION_IN_RANGE: pos={posicion:.1f}% rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(posicion, filtro)
+        logger.debug(f"POSITION_IN_RANGE: pos={posicion:.1f}% -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

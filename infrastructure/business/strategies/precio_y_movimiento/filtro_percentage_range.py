@@ -27,9 +27,8 @@ class FiltroPercentageRange(BaseFiltro):
             return False
 
         pct_range = ((high - low) / low) * 100
-
-        resultado = self._evaluar_condicion(pct_range, min_val, max_val)
-        logger.debug(f"PERCENTAGE_RANGE: pct={pct_range:.2f}% rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(pct_range, filtro)
+        logger.debug(f"PERCENTAGE_RANGE: pct={pct_range:.2f}% -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

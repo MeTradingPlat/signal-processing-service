@@ -28,13 +28,12 @@ class FiltroGapFromClose(BaseFiltro):
         if cierre_anterior == 0:
             return False
 
+        gap = apertura_actual - cierre_anterior
         if formato == "PORCENTAJE":
-            gap = ((apertura_actual - cierre_anterior) / cierre_anterior) * 100
-        else:
-            gap = apertura_actual - cierre_anterior
+            gap = (gap / cierre_anterior) * 100
 
-        resultado = self._evaluar_condicion(gap, min_val, max_val)
-        logger.debug(f"GAP_FROM_CLOSE: gap={gap:.4f} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(gap, filtro)
+        logger.debug(f"GAP_FROM_CLOSE: gap={gap:.4f} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

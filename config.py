@@ -6,10 +6,10 @@ import os
 SCANNER_SERVICE_URL = os.getenv("SCANNER_SERVICE_URL", "http://localhost:8080/api")
 MARKETDATA_SERVICE_URL = os.getenv("MARKETDATA_SERVICE_URL", "http://localhost:8080/api")
 
-# Concurrencia - defaults conservadores para CPU de 2 nucleos/2 hilos
-# Para I/O-bound (requests HTTP) se puede subir via env var en produccion
-MAX_WORKERS_ESCANERES = int(os.getenv("MAX_WORKERS_ESCANERES", "3"))
-MAX_WORKERS_SIMBOLOS = int(os.getenv("MAX_WORKERS_SIMBOLOS", "4"))
+# Concurrencia - ajustado para CPU de 2 nucleos/2 hilos sin Hyper-Threading
+# Subir via env var en maquinas con mas cores
+MAX_WORKERS_ESCANERES = int(os.getenv("MAX_WORKERS_ESCANERES", "1"))
+MAX_WORKERS_SIMBOLOS = int(os.getenv("MAX_WORKERS_SIMBOLOS", "2"))
 
 # HTTP
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))

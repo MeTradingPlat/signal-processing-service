@@ -26,7 +26,7 @@ class EscanerScheduler:
         self.obj_procesar_senales_cu = obj_procesar_senales_cu
         self.obj_filtro_executor = obj_filtro_executor
         self.scheduler = BlockingScheduler(
-            executors={'default': ThreadPoolExecutor(4)},
+            executors={'default': ThreadPoolExecutor(2)},
             job_defaults={
                 'misfire_grace_time': 300,
                 'coalesce': True,

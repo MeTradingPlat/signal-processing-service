@@ -42,10 +42,12 @@ jobs:
       - name: Run Application Container
         run: |
           docker run -d \
-            -p 8000:8000 \
+            -p 127.0.0.1:8000:8000 \
             --name "signal-processing-service" \
             --network "metradingplat-network" \
             --restart "unless-stopped" \
+            --memory "512m" \
+            --memory-swap "512m" \
             --label project="metradingplat" \
             --label service="signal-processing-service" \
             -e KAFKA_BOOTSTRAP_SERVERS="kafka:29092" \

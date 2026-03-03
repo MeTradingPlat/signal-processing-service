@@ -2,6 +2,7 @@
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from domain.usecases.validador_barras import validar_barras, INTERVALO_POR_TIMEFRAME
 from domain.models.escaner import Escaner
@@ -26,7 +27,8 @@ class DataFetchService:
             # Sin cache: fetch completo siempre
             return self._fetch_completo(simbolos, timeframes_necesarios)
 
-        for tf, cantidad_velas in timeframes_necesarios.items():
+        def _fetch_timeframe(tf, cantidad_velas):
+            resultado_tf = {}
             simbolos_completo = []
             simbolos_incremental = []
 
@@ -38,18 +40,16 @@ class DataFetchService:
 
             logger.info(f"Cache tf={tf}: {len(simbolos_completo)} fetch completo, {len(simbolos_incremental)} incremental")
 
-            # Fetch completo para simbolos sin cache
             if simbolos_completo:
                 resultado = self._fetch_batch_con_reintentos(simbolos_completo, tf, cantidad_velas)
                 for symbol, candles in resultado.items():
                     self.cache.actualizar(escaner.id_escaner, symbol, tf, candles)
-                    cache_candles[(symbol, tf)] = self.cache.obtener(escaner.id_escaner, symbol, tf) or candles
+                    resultado_tf[(symbol, tf)] = self.cache.obtener(escaner.id_escaner, symbol, tf) or candles
 
-            # Fetch incremental para simbolos con cache
             if simbolos_incremental:
                 barras_nuevas = self.cache.barras_faltantes(escaner.id_escaner, simbolos_incremental[0], tf)
                 if barras_nuevas <= 0:
-                    barras_nuevas = 2  # Minimo 2 barras de margen
+                    barras_nuevas = 2
 
                 logger.info(f"Fetch incremental tf={tf}: {barras_nuevas} barras nuevas para {len(simbolos_incremental)} simbolos")
 
@@ -60,11 +60,25 @@ class DataFetchService:
                     if anadidas > 0:
                         logger.debug(f"Cache {symbol} tf={tf}: +{anadidas} barras nuevas")
 
-                # Usar datos del cache para todos los incrementales
                 for symbol in simbolos_incremental:
                     cached = self.cache.obtener(escaner.id_escaner, symbol, tf)
                     if cached:
-                        cache_candles[(symbol, tf)] = cached
+                        resultado_tf[(symbol, tf)] = cached
+
+            return resultado_tf
+
+        n_workers = min(len(timeframes_necesarios), 4)
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {
+                executor.submit(_fetch_timeframe, tf, qty): tf
+                for tf, qty in timeframes_necesarios.items()
+            }
+            for future in as_completed(futures):
+                tf = futures[future]
+                try:
+                    cache_candles.update(future.result())
+                except Exception as e:
+                    logger.error(f"Error en fetch paralelo tf={tf}: {e}")
 
         return cache_candles
 

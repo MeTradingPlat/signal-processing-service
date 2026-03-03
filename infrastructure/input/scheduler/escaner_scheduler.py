@@ -14,6 +14,7 @@ from domain.models.escaner import Escaner
 from domain.services.market_calendar_service import MarketCalendarService
 from config import (
     PRE_DESPERTAR_MINUTOS,
+    MAX_WORKERS_ESCANERES,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ class EscanerScheduler:
         self.obj_procesar_senales_cu = obj_procesar_senales_cu
         self.obj_filtro_executor = obj_filtro_executor
         self.scheduler = BlockingScheduler(
-            executors={'default': ThreadPoolExecutor(2)},
+            executors={'default': ThreadPoolExecutor(MAX_WORKERS_ESCANERES)},
             job_defaults={
                 'misfire_grace_time': 300,
                 'coalesce': True,

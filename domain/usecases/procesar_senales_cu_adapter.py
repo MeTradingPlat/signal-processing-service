@@ -304,21 +304,30 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
 
         logger.info(f"Fetch completado: {len(cache_candles)} (symbol,tf) pairs disponibles")
 
-        # 3. Evaluar cada simbolo localmente desde el cache
+        # 3. Evaluar cada simbolo localmente desde el cache (paralelo)
         senales_generadas = 0
         errores = 0
         sin_datos = 0
+        lock_stats = threading.Lock()
 
-        for simbolo in simbolos:
-            try:
-                resultado = self._evaluar_simbolo_con_cache(escaner, simbolo, cache_candles)
-                if resultado == "SIGNAL":
-                    senales_generadas += 1
-                elif resultado == "NO_DATA":
-                    sin_datos += 1
-            except Exception as e:
-                logger.error(f"Error evaluando {simbolo} desde cache: {e}")
-                errores += 1
+        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS_SIMBOLOS, len(simbolos))) as executor:
+            futures = {
+                executor.submit(self._evaluar_simbolo_con_cache, escaner, simbolo, cache_candles): simbolo
+                for simbolo in simbolos
+            }
+            for future in as_completed(futures):
+                simbolo = futures[future]
+                try:
+                    resultado = future.result()
+                    with lock_stats:
+                        if resultado == "SIGNAL":
+                            senales_generadas += 1
+                        elif resultado == "NO_DATA":
+                            sin_datos += 1
+                except Exception as e:
+                    logger.error(f"Error evaluando {simbolo} desde cache: {e}")
+                    with lock_stats:
+                        errores += 1
 
         logger.info(f"Escaner clasico {escaner.nombre} completado: {senales_generadas} senales generadas")
 

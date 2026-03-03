@@ -188,6 +188,11 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 break
 
         logger.info(f"Sesion '{escaner.nombre}' finalizada")
+
+        # UNA_VEZ: notificar completado al finalizar la sesion completa (una sola vez)
+        if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
+            self._notificar_escaner_completado(escaner, "COMPLETADO")
+
         sys.stdout.flush()
 
     def _calcular_intervalo_sesion(self, escaner: Escaner) -> int:
@@ -228,9 +233,6 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
         simbolos = self._obtener_simbolos(escaner)
         if not simbolos:
             logger.warning(f"Escaner {escaner.nombre}: no se obtuvieron simbolos.")
-            # Si es tipo UNA_VEZ, notificar que termino (aunque sin simbolos)
-            if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
-                self._notificar_escaner_completado(escaner, "SIN_SIMBOLOS")
             return
 
         logger.info(f"Escaner {escaner.nombre}: {len(simbolos)} simbolos a evaluar")
@@ -275,11 +277,6 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                     logger.error(f"Error en fase 1 para {simbolo}: {e}", exc_info=True)
 
         logger.info(f"Escaner {escaner.nombre}: ejecucion completada")
-
-        # Si es tipo UNA_VEZ, notificar que termino
-        if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
-            self._notificar_escaner_completado(escaner, "COMPLETADO")
-
         sys.stdout.flush()
 
     # =========================================================================
@@ -327,11 +324,6 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
 
         # Publicar log de finalizacion con estadisticas
         self.notification_service.publicar_log_finalizacion_escaner(escaner, simbolos, senales_generadas, sin_datos, errores)
-
-        # Si es tipo UNA_VEZ, notificar que termino
-        if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
-            self._notificar_escaner_completado(escaner, "COMPLETADO")
-
         sys.stdout.flush()
 
     # =========================================================================

@@ -228,9 +228,9 @@ class EscanerScheduler:
             sys.stdout.flush()
             return
 
-        self.obj_procesar_senales_cu.ejecutar_escaner(escaner)
+        self.obj_procesar_senales_cu.ejecutar_sesion(escaner)
 
-        # UNA_VEZ: eliminar job inmediatamente tras la ejecucion
+        # UNA_VEZ: eliminar job tras finalizar la sesion completa (hora_inicio -> hora_fin)
         if escaner.obj_tipo_ejecucion.enum_tipo_ejecucion == "UNA_VEZ":
             logger.info(f"Escaner UNA_VEZ '{escaner.nombre}' completado, removiendo job del scheduler.")
             self.remover_tarea_escaner(escaner.id_escaner)

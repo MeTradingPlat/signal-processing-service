@@ -17,6 +17,12 @@ RUN addgroup --system appuser && adduser --system --ingroup appuser appuser
 
 COPY requirements.txt .
 
+# Timezone: forzar UTC en el contenedor independientemente del host
+# Critico para que todos los datetime.now() sin timezone retornen UTC
+# y para que los logs muestren timestamps correctos
+ENV TZ=UTC
+ENV PYTHONUNBUFFERED=1
+
 # Deshabilitar optimizaciones SIMD que requieren AVX
 # Esto es necesario para CPUs antiguos como AMD E-350
 ENV NPY_DISABLE_SVML=1

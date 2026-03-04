@@ -18,6 +18,7 @@ from domain.services.time_sync_service import TimeSyncService
 from config import (
     MAX_WORKERS_SIMBOLOS,
     SIGNAL_COOLDOWN_SECONDS,
+    SIGNAL_MARGIN_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 break
 
             # Dormir hasta el proximo cierre de barra
-            continuar = TimeSyncService.sleep_hasta_proximo_cierre(intervalo, margen_segundos=0)
+            continuar = TimeSyncService.sleep_hasta_proximo_cierre(intervalo, margen_segundos=SIGNAL_MARGIN_SECONDS)
             if not continuar:
                 # Cierre de barra del dia ya ocurrio (ej: D1 tras cierre NYSE)
                 logger.info(f"Sesion '{escaner.nombre}': cierre de barra del dia ya ocurrio, terminando")

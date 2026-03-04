@@ -6,17 +6,19 @@ import os
 SCANNER_SERVICE_URL = os.getenv("SCANNER_SERVICE_URL", "http://localhost:8080/api")
 MARKETDATA_SERVICE_URL = os.getenv("MARKETDATA_SERVICE_URL", "http://localhost:8080/api")
 
-# Concurrencia - ajustado para CPU de 2 nucleos/2 hilos sin Hyper-Threading
-# Subir via env var en maquinas con mas cores
-MAX_WORKERS_ESCANERES = int(os.getenv("MAX_WORKERS_ESCANERES", "1"))
-MAX_WORKERS_SIMBOLOS = int(os.getenv("MAX_WORKERS_SIMBOLOS", "2"))
+# Concurrencia
+# MAX_WORKERS_ESCANERES eliminado: cada escaner corre en su propio proceso OS
+MAX_WORKERS_SIMBOLOS = int(os.getenv("MAX_WORKERS_SIMBOLOS", "4"))  # threads por ScannerProcess
 
 # HTTP
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
-# Scheduler
-POLLING_INTERVAL_SECONDS = int(os.getenv("POLLING_INTERVAL_SECONDS", "60"))
-SCHEDULER_TIMEZONE = os.getenv("SCHEDULER_TIMEZONE", "UTC")
+# Procesos
+SCANNER_PROCESS_JOIN_TIMEOUT = int(os.getenv("SCANNER_PROCESS_JOIN_TIMEOUT", "30"))
+
+# Timing: margen de espera tras el cierre de vela antes de fetchear datos
+# El proveedor de datos necesita unos segundos para publicar la vela cerrada
+SIGNAL_MARGIN_SECONDS = int(os.getenv("SIGNAL_MARGIN_SECONDS", "2"))
 
 # Kafka
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")

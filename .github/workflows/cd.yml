@@ -46,17 +46,18 @@ jobs:
             --name "signal-processing-service" \
             --network "metradingplat-network" \
             --restart "unless-stopped" \
-            --memory "512m" \
-            --memory-swap "512m" \
+            --memory "768m" \
+            --memory-swap "768m" \
             --label project="metradingplat" \
             --label service="signal-processing-service" \
             -e KAFKA_BOOTSTRAP_SERVERS="kafka:29092" \
             -e SCANNER_SERVICE_URL="http://gateway:8080/api" \
             -e MARKETDATA_SERVICE_URL="http://gateway:8080/api" \
-            -e MAX_WORKERS_ESCANERES="8" \
             -e MAX_WORKERS_SIMBOLOS="4" \
             -e MAX_SYMBOLS_REALTIME="50" \
             -e EVENT_POLLING_INTERVAL_SECONDS="1" \
+            -e SIGNAL_MARGIN_SECONDS="2" \
+            -e SCANNER_PROCESS_JOIN_TIMEOUT="30" \
             virtud142/metradingplat_signal_processing_service:latest
 
       - name: Clean Old Images of This Service

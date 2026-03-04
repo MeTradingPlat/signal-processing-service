@@ -1,49 +1,78 @@
-from fastapi import FastAPI, HTTPException
-from typing import Optional, Dict, Any
-import logging
+"""Controlador FastAPI: recibe webhooks de scanner-management-service.
 
-# We will inject the UseCase manually or via a simple Dependency Injection pattern
-# since FastAPI's dependency injection is per-request, but we have a persistent singleton UseCase.
+Endpoints:
+  POST /api/signal-processing/escaner        → iniciar escaner
+  POST /api/signal-processing/escaner/{id}/detener → detener escaner
+"""
+
+from fastapi import FastAPI, HTTPException
+from typing import Dict, Any
+import logging
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
 
-# Global variable to hold the use case reference
-_use_case = None
+# Referencias globales inyectadas desde main.py
+_process_manager = None
+_comunicacion = None
 
-def set_use_case(use_case):
-    global _use_case
-    _use_case = use_case
+
+def set_process_manager(process_manager, comunicacion_adapter) -> None:
+    """Inyecta ProcessManager y ComunicacionExternaAdapter en el controlador."""
+    global _process_manager, _comunicacion
+    _process_manager = process_manager
+    _comunicacion = comunicacion_adapter
+
 
 @app.post("/api/signal-processing/escaner")
-async def registrar_escaner(escaner: Dict[str, Any]):
-    logger.info(f"[API] POST /api/signal-processing/escaner - Solicitud recibida")
-    logger.info(f"[API] Datos escaner: id={escaner.get('idEscaner')}, nombre={escaner.get('nombre')}")
+async def registrar_escaner(escaner_data: Dict[str, Any]):
+    """Recibe un escaner desde scanner-management-service y lo inicia."""
+    nombre = escaner_data.get('nombre', 'unknown')
+    id_escaner = escaner_data.get('idEscaner', '?')
+    logger.info(
+        f"[API] POST /api/signal-processing/escaner "
+        f"- id={id_escaner}, nombre={nombre}"
+    )
 
-    if _use_case is None:
-        logger.error("[API] Service not fully initialized - use_case is None")
+    if _process_manager is None or _comunicacion is None:
+        logger.error("[API] Service not fully initialized")
         raise HTTPException(status_code=503, detail="Service not fully initialized")
 
     try:
-        _use_case.registrar_escaner(escaner)
-        logger.info(f"[API] POST /api/signal-processing/escaner - Respuesta OK: id={escaner.get('idEscaner')}")
-        return {"status": "ok", "message": "Escaner registrado"}
+        # Mapear dict a objeto Escaner usando el adaptador de comunicacion
+        escaner = _comunicacion._mapear_escaner(escaner_data)
+
+        if not escaner.esta_activo():
+            logger.info(f"[API] Escaner '{nombre}' no esta activo, ignorando")
+            return {"status": "ok", "message": "Escaner no activo, ignorado"}
+
+        _process_manager.iniciar_escaner(escaner)
+        logger.info(f"[API] Escaner '{nombre}' iniciado OK")
+        return {"status": "ok", "message": "Escaner iniciado"}
+
     except Exception as e:
-        logger.error(f"[API] POST /api/signal-processing/escaner - ERROR: {e}", exc_info=True)
+        logger.error(
+            f"[API] Error iniciando escaner '{nombre}': {e}", exc_info=True
+        )
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/signal-processing/escaner/{id}/detener")
 async def detener_escaner(id: int):
-    logger.info(f"[API] POST /api/signal-processing/escaner/{id}/detener - Solicitud recibida")
+    """Detiene el ScannerProcess del escaner dado."""
+    logger.info(f"[API] POST /api/signal-processing/escaner/{id}/detener")
 
-    if _use_case is None:
-        logger.error("[API] Service not fully initialized - use_case is None")
+    if _process_manager is None:
+        logger.error("[API] Service not fully initialized")
         raise HTTPException(status_code=503, detail="Service not fully initialized")
 
     try:
-        _use_case.detener_escaner(id)
-        logger.info(f"[API] POST /api/signal-processing/escaner/{id}/detener - Respuesta OK")
+        _process_manager.detener_escaner(id)
+        logger.info(f"[API] Escaner {id} detenido OK")
         return {"status": "ok", "message": "Escaner detenido"}
+
     except Exception as e:
-        logger.error(f"[API] POST /api/signal-processing/escaner/{id}/detener - ERROR: {e}", exc_info=True)
+        logger.error(
+            f"[API] Error deteniendo escaner {id}: {e}", exc_info=True
+        )
         raise HTTPException(status_code=500, detail=str(e))

@@ -184,8 +184,18 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
             # Dormir hasta el proximo cierre de barra
             continuar = TimeSyncService.sleep_hasta_proximo_cierre(intervalo, margen_segundos=SIGNAL_MARGIN_SECONDS)
             if not continuar:
-                # Cierre de barra del dia ya ocurrio (ej: D1 tras cierre NYSE)
-                logger.info(f"Sesion '{escaner.nombre}': cierre de barra del dia ya ocurrio, terminando")
+                # Cierre de barra del dia ya ocurrio (ej: D1 tras cierre NYSE).
+                # No hay nuevas barras, pero mantener el escaner vivo (INICIADO)
+                # hasta hora_fin. Dormir en chunks de 30s para ser interruptible.
+                logger.info(
+                    f"Sesion '{escaner.nombre}': cierre de barra ya ocurrio, "
+                    f"esperando hasta hora_fin ({escaner.hora_fin} UTC)"
+                )
+                while True:
+                    ahora_check = datetime.now(timezone.utc).time()
+                    if ahora_check >= hora_fin_t:
+                        break
+                    time.sleep(30)
                 break
 
         logger.info(f"Sesion '{escaner.nombre}' finalizada")

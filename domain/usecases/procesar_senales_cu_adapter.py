@@ -15,6 +15,7 @@ from domain.models.escaner import Escaner
 from domain.services.signal_notification_service import SignalNotificationService
 from domain.services.data_fetch_service import DataFetchService
 from domain.services.time_sync_service import TimeSyncService
+from domain.usecases.validador_barras import validar_barras
 from config import (
     MAX_WORKERS_SIMBOLOS,
     SIGNAL_COOLDOWN_SECONDS,

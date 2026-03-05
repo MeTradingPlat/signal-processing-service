@@ -18,7 +18,8 @@ class FiltroAverageVolume(BaseFiltro):
         if len(candles) < 1:
             return False
 
-        volumes = [c.volume for c in candles]
+        periodo = self.DEFAULT_PERIODO
+        volumes = [c.volume for c in candles[-periodo:]]
         avg_volume = sum(volumes) / len(volumes)
         resultado = self._evaluar_condicion_completa(avg_volume, filtro)
         logger.debug(f"AVERAGE_VOLUME: avg={avg_volume:.0f} -> {resultado}")

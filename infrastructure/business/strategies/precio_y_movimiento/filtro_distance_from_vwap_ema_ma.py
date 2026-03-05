@@ -16,10 +16,6 @@ class FiltroDistanceFromVwapEmaMa(BaseFiltro):
         if not candles:
             return False
 
-        min_val, max_val = self._obtener_valor_condicional(filtro)
-        if min_val is None:
-            return False
-
         linea_ref = self._obtener_valor_string(filtro, "LINEA_REFERENCIA_DISTANCE_FROM_VWAP_EMA_MA") or "VWAP"
         modo = self._obtener_valor_string(filtro, "MODO_DISTANCIA_DISTANCE_FROM_VWAP_EMA_MA") or "PORCENTAJE"
         periodo = self._obtener_valor_int(filtro, "PERIODO_LINEA_DISTANCE_FROM_VWAP_EMA_MA")
@@ -50,8 +46,8 @@ class FiltroDistanceFromVwapEmaMa(BaseFiltro):
         else:
             distancia = precio_actual - valor_linea
 
-        resultado = self._evaluar_condicion(distancia, min_val, max_val)
-        logger.debug(f"DISTANCE_FROM_{linea_ref}: dist={distancia:.2f} rango=[{min_val}, {max_val}] -> {resultado}")
+        resultado = self._evaluar_condicion_completa(distancia, filtro)
+        logger.debug(f"DISTANCE_FROM_{linea_ref}: dist={distancia:.2f} -> {resultado}")
         return resultado
 
     def get_timeframe_requerido(self, filtro: Filtro) -> str:

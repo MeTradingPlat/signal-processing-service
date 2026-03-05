@@ -20,8 +20,8 @@ class FiltroPercentageRange(BaseFiltro):
         if min_val is None:
             return False
 
-        high = max(c.high for c in candles)
-        low = min(c.low for c in candles)
+        high = candles[-1].high
+        low = candles[-1].low
 
         if low == 0:
             return False

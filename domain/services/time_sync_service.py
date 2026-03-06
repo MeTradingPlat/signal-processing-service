@@ -25,7 +25,7 @@ class TimeSyncService:
 
         if ts_cierre is None:
             # El cierre de la barra del dia ya ocurrio (p.ej. D1 cierra a las 16:00 ET)
-            logger.info("TimeSync: Cierre de barra del dia ya ocurrio, omitiendo ejecucion.")
+            logger.info(f"TimeSync: El mercado (NYSE/D1) ya ha cerrado por hoy ({HORA_CIERRE_NYSE}:00 ET). No se esperan nuevas barras hasta el proximo periodo.")
             return False
 
         segundos_restantes = (ts_cierre - ahora).total_seconds()

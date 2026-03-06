@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 from domain.models.candle import Candle
 from domain.models.datos_fundamentales import DatosFundamentales
-from domain.models.escaner import Filtro
+from domain.models.escaner import Filtro, ValorCondicional
 
 
 class BaseFiltro(ABC):

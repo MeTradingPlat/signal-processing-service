@@ -130,12 +130,13 @@ class ProcesarSenalesCUAdapter(ProcesarSenalesCUIntPort):
                 # No hay nuevas barras, pero mantener el escaner vivo (INICIADO)
                 # hasta hora_fin. Dormir en chunks de 30s para ser interruptible.
                 logger.info(
-                    f"Sesion '{escaner.nombre}': cierre de barra ya ocurrio, "
-                    f"esperando hasta hora_fin ({escaner.hora_fin} UTC)"
+                    f"Sesion '{escaner.nombre}': El mercado ha cerrado o la barra del dia ya cerro. "
+                    f"Entrando en modo de espera hasta la hora de fin ({escaner.hora_fin} UTC) o reapertura."
                 )
                 while True:
                     ahora_check = datetime.now(timezone.utc).time()
                     if ahora_check >= hora_fin_t:
+                        logger.info(f"Sesion '{escaner.nombre}': Alcanzada hora_fin definitiva ({escaner.hora_fin} UTC).")
                         break
                     time.sleep(30)
                 break

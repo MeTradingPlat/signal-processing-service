@@ -1,15 +1,21 @@
-name: CI Metradingplat Signal Processing Service
+name: CI Signal Processing Service
 
 on:
   push:
     branches: ["master"]
 
 jobs:
-  build:
-    runs-on: self-hosted
+  test-and-build:
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build --target test -t signal-processing-service:test .
+
+      - name: Run tests
+        run: docker run --rm signal-processing-service:test
 
       - name: Login Dockerhub
         env:
@@ -17,7 +23,7 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
 
-      - name: Build and push Docker image
+      - name: Build and push production image
         run: |
-          docker build -t virtud142/metradingplat_signal_processing_service:latest .
+          docker build --target production -t virtud142/metradingplat_signal_processing_service:latest .
           docker push virtud142/metradingplat_signal_processing_service:latest

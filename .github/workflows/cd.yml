@@ -1,8 +1,8 @@
-name: CD Metradingplat Signal Processing Service
+name: CD Signal Processing Service
 
 on:
   workflow_run:
-    workflows: ["CI Metradingplat Signal Processing Service"]
+    workflows: ["CI Signal Processing Service"]
     types:
       - completed
 
@@ -20,15 +20,12 @@ jobs:
         run: |
           echo "--- DISK SPACE CHECK ---"
           df -h
-          echo "--- CLEANING SHARED BASE IMAGES ---"
-          docker image rm -f python:3.11-slim python:3.11-alpine || true
           echo "--- CLEANING SERVICE METADATA ---"
           docker rm -f signal-processing-service || true
           docker image rm -f virtud142/metradingplat_signal_processing_service:latest || true
 
       - name: Pull Application Image (with Retry Logic)
         run: |
-          echo "Attempting to pull image with auto-retry for stability..."
           for i in 1 2 3; do
             docker pull virtud142/metradingplat_signal_processing_service:latest && exit 0 || \
             (echo "Attempt $i failed, waiting 10s..." && sleep 10)
@@ -36,52 +33,40 @@ jobs:
           echo "All pull attempts failed. Docker daemon might need a manual restart."
           exit 1
 
-      - name: Delete Old Application Container
-        run: docker rm -f signal-processing-service || true
-
       - name: Run Application Container
         run: |
           docker run -d \
-            -p 127.0.0.1:8000:8000 \
+            -p 127.0.0.1:8086:8000 \
             --name "signal-processing-service" \
             --network "metradingplat-network" \
             --restart "unless-stopped" \
-            --memory "768m" \
-            --memory-swap "768m" \
+            --memory "512m" \
+            --memory-swap "512m" \
             --label project="metradingplat" \
             --label service="signal-processing-service" \
-            -e KAFKA_BOOTSTRAP_SERVERS="kafka:29092" \
-            -e SCANNER_SERVICE_URL="http://gateway:8080/api" \
-            -e MARKETDATA_SERVICE_URL="http://gateway:8080/api" \
-            -e MAX_WORKERS_SIMBOLOS="4" \
-            -e MAX_SYMBOLS_REALTIME="50" \
-            -e EVENT_POLLING_INTERVAL_SECONDS="1" \
-            -e SIGNAL_MARGIN_SECONDS="2" \
-            -e SCANNER_PROCESS_JOIN_TIMEOUT="30" \
+            -e SP_SCANNER_MANAGEMENT_URL="http://scanner-management-service:8081" \
+            -e SP_MARKETDATA_URL="http://marketdata-service:8082" \
+            -e SP_KAFKA_BOOTSTRAP_SERVERS="kafka:29092" \
+            -e SP_KAFKA_GROUP_ID="signal-processing-group" \
+            -e SP_MAX_WORKERS_POOL="2" \
+            -e SP_MAX_BARRAS_POR_SIMBOLO="500" \
+            -e SP_MARGEN_CIERRE_VELA_SEG="5" \
             virtud142/metradingplat_signal_processing_service:latest
 
       - name: Clean Old Images of This Service
         run: |
-          echo "Cleaning old images for signal-processing-service..."
-          CURRENT_IMAGE=$(docker inspect signal-processing-service --format='{{.Image}}' 2>/dev/null || echo "")
-          if [ -n "$CURRENT_IMAGE" ]; then
-            docker images --filter "label=service=signal-processing-service" --format "{{.ID}}" | while read img; do
-              if [ "$img" != "${CURRENT_IMAGE:7:12}" ]; then
-                echo "Removing old image: $img"
-                docker rmi -f $img 2>/dev/null || true
-              fi
-            done
-          fi
-          docker images virtud142/metradingplat_signal_processing_service --format "{{.ID}} {{.Tag}}" | grep -v "latest" | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
+          docker images virtud142/metradingplat_signal_processing_service --format "{{.ID}} {{.Tag}}" \
+            | grep -v "latest" | awk '{print $1}' | xargs -r docker rmi -f 2>/dev/null || true
 
       - name: Clean Stopped Containers of This Service
         run: |
-          echo "Cleaning stopped containers for signal-processing-service..."
-          docker ps -a --filter "label=service=signal-processing-service" --filter "status=exited" -q | xargs -r docker rm 2>/dev/null || true
+          docker ps -a \
+            --filter "label=service=signal-processing-service" \
+            --filter "status=exited" -q | xargs -r docker rm 2>/dev/null || true
 
       - name: Final Status Check
         run: |
-          sleep 10
+          sleep 5
           docker ps | grep signal-processing-service
-          echo "--- Container Logs (last 20 lines) ---"
+          echo "--- LAST 20 LINES OF LOGS ---"
           docker logs --tail 20 signal-processing-service

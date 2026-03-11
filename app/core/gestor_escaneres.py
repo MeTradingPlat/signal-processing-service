@@ -70,7 +70,7 @@ class GestorEscaneres:
         self._ejecutores[escaner.id_escaner] = ejecutor
         self._escaneres[escaner.id_escaner] = escaner
 
-        logger.info("Escaner %d '%s' iniciado como Task", escaner.id_escaner, escaner.nombre)
+        logger.info(">>> ESCANER INICIADO  id=%d  nombre='%s'  mercados=%s", escaner.id_escaner, escaner.nombre, escaner.mercados)
 
     async def _ejecutar_con_manejo_errores(self, escaner: Escaner, ejecutor: EjecutorEscaner):
         """Wrapper que maneja errores y limpieza del Task."""
@@ -103,7 +103,7 @@ class GestorEscaneres:
             except asyncio.CancelledError:
                 pass
 
-        logger.info("Escaner %d detenido (razon: %s)", id_escaner, razon or "N/A")
+        logger.info("<<< ESCANER DETENIDO  id=%d  razon='%s'", id_escaner, razon or "N/A")
 
     async def detener_todos(self):
         """Detiene todos los escáneres activos."""
@@ -118,7 +118,7 @@ class GestorEscaneres:
         for intento in range(max_reintentos):
             try:
                 escaneres_data = await self._escaner_rest.obtener_escaneres_iniciados()
-                logger.info("Recuperados %d escaneres activos", len(escaneres_data))
+                logger.info("=== STARTUP: %d escaner(es) activos recuperados de scanner-management ===", len(escaneres_data))
 
                 for esc_data in escaneres_data:
                     id_escaner = esc_data.get("idEscaner")
@@ -138,7 +138,7 @@ class GestorEscaneres:
                 )
                 await asyncio.sleep(espera)
 
-        logger.error("No se pudieron recuperar escaneres activos después de %d intentos", max_reintentos)
+        logger.error("=== STARTUP FALLIDO: no se pudieron recuperar escaneres después de %d intentos ===", max_reintentos)
 
     def obtener_estado(self) -> dict:
         """Retorna estado de todos los escáneres activos."""

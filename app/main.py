@@ -19,6 +19,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Silenciar librerías ruidosas para ver solo logs de la aplicación
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("aiokafka").setLevel(logging.WARNING)
+logging.getLogger("kafka").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

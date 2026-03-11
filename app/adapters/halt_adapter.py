@@ -34,7 +34,7 @@ def obtener_simbolos_halted() -> set[str]:
         import httpx
         import pandas as pd
 
-        resp = httpx.get(_NASDAQ_HALT_URL, timeout=_TIMEOUT_SEG)
+        resp = httpx.get(_NASDAQ_HALT_URL, timeout=_TIMEOUT_SEG, follow_redirects=True)
         if resp.status_code != 200:
             logger.warning("NASDAQ halt file: HTTP %d", resp.status_code)
             return set()

@@ -10,7 +10,11 @@ class EscanerRestAdapter:
 
     def __init__(self, base_url: str):
         self._base_url = base_url
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=10.0,
+            headers={"X-Gateway-Passed": "true"},
+        )
 
     async def obtener_escaneres_iniciados(self) -> list[dict]:
         """GET /api/escaner/iniciados"""

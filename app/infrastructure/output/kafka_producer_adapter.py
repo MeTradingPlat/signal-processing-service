@@ -35,9 +35,10 @@ class KafkaProducerAdapter:
         try:
             await self._producer.send_and_wait(TOPIC_SIGNALS, value=senal_dict)
             logger.info(
-                "Señal publicada: escaner=%s, symbol=%s",
+                "*** SEÑAL  escaner='%s'  symbol=%s  filtros=%s",
                 senal_dict.get("nombreEscaner"),
                 senal_dict.get("symbol"),
+                senal_dict.get("filtrosActivos", []),
             )
         except Exception as e:
             logger.error("Error publicando señal: %s", e)

@@ -71,9 +71,14 @@ def make_ejecutor(escaner: Escaner, gestor_tiempo: GestorTiempo) -> EjecutorEsca
     )
 
 
-def make_gestor_tiempo_mock() -> MagicMock:
-    """Crea un GestorTiempo mockeado con comportamiento por defecto sensato."""
+def make_gestor_tiempo_mock(ahora: datetime | None = None) -> MagicMock:
+    """Crea un GestorTiempo mockeado con comportamiento por defecto sensato.
+
+    Por defecto devuelve un lunes a las 10:00 (dentro de cualquier ventana
+    típica 09:30-16:00) para que _esperar_ventana_trading() pase directamente.
+    """
     gt = MagicMock(spec=GestorTiempo)
+    gt.ahora_utc = MagicMock(return_value=ahora or utc(2025, 3, 3, 10, 0))
     gt.es_dia_habil = MagicMock(return_value=True)
     gt.siguiente_dia_habil = MagicMock(return_value=date(2025, 3, 3))
     gt.construir_datetime_utc = MagicMock(return_value=utc(2025, 3, 3, 9, 30))
@@ -246,8 +251,9 @@ class TestHorarioEscaner:
         objetivo = utc(2025, 3, 4, 9, 30)
 
         llamadas_ahora = [
-            utc(2025, 3, 3, 16, 5),   # 1ª iteración: hora_fin superada
-            utc(2025, 3, 4, 9, 45),   # 2ª iteración tras dormir: dentro de horario
+            utc(2025, 3, 3, 10, 0),   # _esperar_ventana_trading: dentro de horario → pasa
+            utc(2025, 3, 3, 16, 5),   # loop 1ª iteración: hora_fin superada → duerme
+            utc(2025, 3, 4, 9, 45),   # loop 2ª iteración tras dormir: dentro de horario
         ]
         gt.ahora_utc = MagicMock(side_effect=llamadas_ahora)
         gt.siguiente_dia_habil = MagicMock(return_value=martes)

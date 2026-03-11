@@ -12,7 +12,11 @@ class MarketdataRestAdapter:
 
     def __init__(self, base_url: str):
         self._base_url = base_url
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30.0,
+            headers={"X-Gateway-Passed": "true"},
+        )
 
     async def obtener_simbolos_por_mercados(self, mercados: list[str]) -> list[str]:
         """GET /api/marketdata/symbols?markets=us_equities,crypto,...

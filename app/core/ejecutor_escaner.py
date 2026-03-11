@@ -73,62 +73,21 @@ class EjecutorEscaner:
             escaner.id_escaner, escaner.nombre, tf_str, escaner.mercados,
         )
 
-        # 2. Obtener símbolos
-        simbolos = await self._marketdata.obtener_simbolos_por_mercados(escaner.mercados)
-        if not simbolos:
-            await self._kafka.publicar_log(
-                escaner.id_escaner, "WARN",
-                f"Escáner {escaner.nombre}: no se encontraron símbolos para mercados {escaner.mercados}",
-            )
+        # 2. Esperar primera ventana de trading antes de tocar marketdata
+        if not await self._esperar_ventana_trading():
             return
 
-        logger.info("Escaner %d: %d símbolos encontrados", escaner.id_escaner, len(simbolos))
-
-        # 2b. Cargar fundamentales (una vez al día)
-        await self._refrescar_fundamentales(simbolos)
-
-        # 3. Cargar barras históricas iniciales
-        barras_iniciales = await self._marketdata.obtener_barras_batch(
-            simbolos, tf_str, bars=200,
-        )
-
-        for symbol in simbolos:
-            velas_raw = barras_iniciales.get(symbol, [])
-            df = GestorBarras.crear_dataframe_desde_velas(velas_raw)
-            self._contextos[symbol] = ContextoSimbolo(
-                symbol=symbol,
-                df_barras=df,
-                ultima_vela_timestamp=velas_raw[-1].get("timestamp") if velas_raw else None,
-            )
-
-        await self._kafka.publicar_log(
-            escaner.id_escaner, "INFO",
-            f"Escáner {escaner.nombre} iniciado con {len(simbolos)} símbolos, timeframe {tf_str}",
-        )
+        # 3. Cargar datos para la sesión actual
+        if not await self._iniciar_sesion(tf_str):
+            return
 
         # 4. Loop principal
         while self._activo:
             ahora = gt.ahora_utc()
             fecha_hoy = ahora.date()
-
-            # 4a. Verificar si hoy es día hábil para los mercados del escáner
-            if not all(gt.es_dia_habil(m, fecha_hoy) for m in escaner.mercados):
-                siguiente = gt.siguiente_dia_habil(escaner.mercados, fecha_hoy)
-                objetivo = gt.construir_datetime_utc(escaner.hora_inicio, siguiente)
-                logger.info(
-                    "Escaner %d: mercado cerrado hoy (%s), durmiendo hasta %s",
-                    escaner.id_escaner, fecha_hoy, objetivo.isoformat(),
-                )
-                await self._kafka.publicar_log(
-                    escaner.id_escaner, "INFO",
-                    f"Escáner {escaner.nombre}: mercado cerrado ({fecha_hoy}), reanuda el {siguiente}",
-                )
-                await gt.dormir_hasta(objetivo)
-                continue
-
             hora_actual = ahora.time()
 
-            # 4b. Verificar hora_fin
+            # 4a. Verificar hora_fin
             if hora_actual >= escaner.hora_fin:
                 logger.info(
                     "Escaner %d: hora_fin alcanzada (%s)",
@@ -154,24 +113,14 @@ class EjecutorEscaner:
                     f"Escáner {escaner.nombre}: sesión finalizada, reanuda el {siguiente} a las {escaner.hora_inicio}",
                 )
                 await gt.dormir_hasta(objetivo)
+
+                # Nueva sesión: recargar símbolos y barras frescas
+                if self._activo:
+                    if not await self._iniciar_sesion(tf_str):
+                        break
                 continue
 
-            # 4c. Verificar hora_inicio (todavía no es hora de operar)
-            if hora_actual < escaner.hora_inicio:
-                objetivo = gt.construir_datetime_utc(escaner.hora_inicio, fecha_hoy)
-                logger.info(
-                    "Escaner %d: esperando hasta hora_inicio %s",
-                    escaner.id_escaner, escaner.hora_inicio,
-                )
-                await gt.dormir_hasta(objetivo)
-                continue
-
-            # 4c-bis. Refresh diario de fundamentales (nueva sesión)
-            if self._ultima_fecha_fundamentales != fecha_hoy:
-                simbolos_activos = list(self._contextos.keys())
-                await self._refrescar_fundamentales(simbolos_activos)
-
-            # 4d. Esperar próximo cierre de vela
+            # 4b-bis. Esperar próximo cierre de vela
             # Sleep corto: no necesita anti-drift, el margen lo absorbe
             espera = gt.calcular_espera_vela(intervalo_seg, settings.margen_cierre_vela_seg)
             logger.debug(
@@ -206,6 +155,110 @@ class EjecutorEscaner:
             await self._evaluar_y_publicar()
 
         logger.info("Escaner %d: loop finalizado", escaner.id_escaner)
+
+    async def _esperar_ventana_trading(self) -> bool:
+        """Espera hasta que sea el momento correcto para operar.
+
+        Verifica día hábil, hora_fin y hora_inicio antes de cargar datos.
+        Retorna False si fue cancelado, True cuando está listo para operar.
+        """
+        escaner = self._escaner
+        gt = self._gestor_tiempo
+
+        while self._activo:
+            ahora = gt.ahora_utc()
+            fecha_hoy = ahora.date()
+
+            if not all(gt.es_dia_habil(m, fecha_hoy) for m in escaner.mercados):
+                siguiente = gt.siguiente_dia_habil(escaner.mercados, fecha_hoy)
+                objetivo = gt.construir_datetime_utc(escaner.hora_inicio, siguiente)
+                logger.info(
+                    "Escaner %d: mercado cerrado hoy (%s), esperando hasta %s",
+                    escaner.id_escaner, fecha_hoy, objetivo.isoformat(),
+                )
+                await self._kafka.publicar_log(
+                    escaner.id_escaner, "INFO",
+                    f"Escáner {escaner.nombre}: mercado cerrado ({fecha_hoy}), inicia el {siguiente}",
+                )
+                await gt.dormir_hasta(objetivo)
+                continue
+
+            hora_actual = ahora.time()
+
+            if hora_actual >= escaner.hora_fin:
+                if escaner.tipo_ejecucion == "UNA_VEZ":
+                    logger.warning(
+                        "Escaner %d: hora_fin ya pasó hoy, UNA_VEZ no se ejecutará",
+                        escaner.id_escaner,
+                    )
+                    await self._kafka.publicar_cambio_estado(
+                        escaner.id_escaner, escaner.nombre,
+                        "INICIADO", "DETENIDO",
+                        "ESCANER_UNA_VEZ completado",
+                    )
+                    return False
+                siguiente = gt.siguiente_dia_habil(escaner.mercados, fecha_hoy)
+                objetivo = gt.construir_datetime_utc(escaner.hora_inicio, siguiente)
+                logger.info(
+                    "Escaner %d: ventana de hoy ya cerró, esperando hasta %s",
+                    escaner.id_escaner, objetivo.isoformat(),
+                )
+                await gt.dormir_hasta(objetivo)
+                continue
+
+            if hora_actual < escaner.hora_inicio:
+                objetivo = gt.construir_datetime_utc(escaner.hora_inicio, fecha_hoy)
+                logger.info(
+                    "Escaner %d: esperando hora_inicio %s (UTC)",
+                    escaner.id_escaner, escaner.hora_inicio,
+                )
+                await self._kafka.publicar_log(
+                    escaner.id_escaner, "INFO",
+                    f"Escáner {escaner.nombre}: inicia a las {escaner.hora_inicio} UTC",
+                )
+                await gt.dormir_hasta(objetivo)
+                continue
+
+            return True
+
+        return False
+
+    async def _iniciar_sesion(self, tf_str: str) -> bool:
+        """Carga símbolos, fundamentales y barras históricas para una sesión.
+
+        Retorna False si no se encontraron símbolos.
+        """
+        escaner = self._escaner
+
+        simbolos = await self._marketdata.obtener_simbolos_por_mercados(escaner.mercados)
+        if not simbolos:
+            await self._kafka.publicar_log(
+                escaner.id_escaner, "WARN",
+                f"Escáner {escaner.nombre}: no se encontraron símbolos para {escaner.mercados}",
+            )
+            return False
+
+        logger.info("Escaner %d: %d símbolos cargados para la sesión", escaner.id_escaner, len(simbolos))
+
+        await self._refrescar_fundamentales(simbolos)
+
+        barras_iniciales = await self._marketdata.obtener_barras_batch(simbolos, tf_str, bars=200)
+
+        self._contextos = {}
+        for symbol in simbolos:
+            velas_raw = barras_iniciales.get(symbol, [])
+            df = GestorBarras.crear_dataframe_desde_velas(velas_raw)
+            self._contextos[symbol] = ContextoSimbolo(
+                symbol=symbol,
+                df_barras=df,
+                ultima_vela_timestamp=velas_raw[-1].get("timestamp") if velas_raw else None,
+            )
+
+        await self._kafka.publicar_log(
+            escaner.id_escaner, "INFO",
+            f"Escáner {escaner.nombre}: sesión iniciada con {len(simbolos)} símbolos, timeframe {tf_str}",
+        )
+        return True
 
     async def _refrescar_fundamentales(self, simbolos: list[str]) -> None:
         """Refresca el caché de fundamentales y actualiza los contextos."""

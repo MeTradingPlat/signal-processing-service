@@ -54,7 +54,7 @@ def obtener_simbolos_halted() -> set[str]:
         df.columns = df.columns.str.strip()
 
         if "Symbol" not in df.columns:
-            logger.warning("NASDAQ halt file: columna 'Symbol' no encontrada")
+            logger.debug("NASDAQ halt file: sin columna 'Symbol' (normal fuera de horario)")
             return set()
 
         df["Symbol"] = df["Symbol"].str.strip()

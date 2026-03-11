@@ -1,45 +1,30 @@
-FROM python:3.11-slim
+# ─── Stage 1: base con dependencias ──────────────────────────────────────────
+FROM python:3.12-slim AS base
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ─── Stage 2: tests ───────────────────────────────────────────────────────────
+FROM base AS test
+
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+COPY app/ ./app/
+COPY tests/ ./tests/
+
+CMD ["pytest", "tests/", "-v", "--tb=short"]
+
+# ─── Stage 3: producción ──────────────────────────────────────────────────────
+FROM base AS production
 
 LABEL project="metradingplat"
 LABEL service="signal-processing-service"
 
-WORKDIR /app
-
-# Instalar dependencias de compilacion para numpy/pandas
-# Esto permite compilar desde source sin instrucciones AVX
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN addgroup --system appuser && adduser --system --ingroup appuser appuser
-
-COPY requirements.txt .
-
-# Timezone: forzar UTC en el contenedor independientemente del host
-# Critico para que todos los datetime.now() sin timezone retornen UTC
-# y para que los logs muestren timestamps correctos
-ENV TZ=UTC
-ENV PYTHONUNBUFFERED=1
-
-# Deshabilitar optimizaciones SIMD que requieren AVX
-# Esto es necesario para CPUs antiguos como AMD E-350
-ENV NPY_DISABLE_SVML=1
-ENV OPENBLAS_NUM_THREADS=1
-ENV NPY_DISABLE_CPU_FEATURES="AVX AVX2 AVX512F"
-
-# Usar versiones compatibles con CPUs sin AVX (numpy<2, pandas<3)
-# Las versiones 2.x/3.x requieren AVX incluso compilando desde source
-RUN pip install --no-cache-dir "numpy<2" "pandas<3"
-
-# Instalar el resto de dependencias
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-USER appuser:appuser
+COPY app/ ./app/
 
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

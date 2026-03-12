@@ -19,14 +19,21 @@ Unidades estandarizadas (igual que scanner-management):
   post_market_volume  : acciones raw de la sesión post-market (16:00–20:00 ET)
 
 Batch:
-  - Finviz: ThreadPoolExecutor(max_workers=5) — límite menor por rate-limits de scraping
-  - yfinance: ThreadPoolExecutor(max_workers=10) — más rápido, API oficial
+  - Finviz:   ThreadPoolExecutor(max_workers=3) — scraping conservador
+  - yfinance: ThreadPoolExecutor(max_workers=4) — reducido para evitar ban
   - Para 500 símbolos ~2-4 min al arranque (una vez/día)
   - El caché vive en memoria todo el día; los filtros leen en O(1)
+
+Anti-ban (Yahoo Finance):
+  1. Normalización de símbolos: '/' → '-'  (AKO/A → AKO-A)
+  2. Workers reducidos: 4 concurrentes en vez de 10
+  3. Reintentos con backoff exponencial ante 401/429
+  4. Sesión HTTP cacheada vía requests_cache (dependencia de yfinance)
 """
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -34,9 +41,13 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 
 _ET = ZoneInfo("America/New_York")
-_MAX_WORKERS_YFINANCE = 10
-_MAX_WORKERS_FINVIZ = 5   # Menor por rate-limits del scraping de finviz
+_MAX_WORKERS_YFINANCE = 4   # Reducido (era 10) — menos concurrencia = menos ban
+_MAX_WORKERS_FINVIZ   = 3   # Reducido (era 5)  — scraping más conservador
 _MERCADOS_SIN_FUNDAMENTALES = {"CRYPTO", "FOREX"}
+
+# Reintentos ante rate-limit de Yahoo (401 / 429)
+_MAX_REINTENTOS  = 3
+_PAUSA_BASE_SEG  = 2.0   # pausa inicial; se duplica en cada reintento (2s, 4s, 8s)
 
 # Multiplicadores para parsear strings de finviz ("15.44B", "3.42T", etc.)
 _MULTIPLICADORES: dict[str, float] = {
@@ -45,6 +56,87 @@ _MULTIPLICADORES: dict[str, float] = {
     "B": 1_000_000_000,
     "T": 1_000_000_000_000,
 }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sesión HTTP cacheada para yfinance (anti-ban)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _crear_sesion_cacheada():
+    """Crea una sesión HTTP cacheada usando requests_cache.
+
+    requests_cache es dependencia directa de yfinance, siempre disponible.
+    Cachea respuestas HTTP durante 1 hora → reduce peticiones duplicadas
+    y evita el rate-limiting de Yahoo Finance.
+    Retorna None si no está disponible (degradación elegante).
+    """
+    try:
+        import requests_cache
+        sesion = requests_cache.CachedSession(
+            "yfinance_http_cache",
+            expire_after=3_600,      # 1 hora
+            allowable_codes=[200],   # solo cachear respuestas OK
+        )
+        logger.debug("requests_cache activado para yfinance (expire=1h)")
+        return sesion
+    except Exception:
+        logger.debug("requests_cache no disponible — sin caché HTTP")
+        return None
+
+
+_YF_SESSION = _crear_sesion_cacheada()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Normalización de símbolos (Yahoo usa '-' donde los mercados usan '/')
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _normalizar_simbolo_yahoo(symbol: str) -> str:
+    """Convierte el formato de símbolo al esperado por Yahoo Finance.
+
+    Yahoo Finance usa '-' como separador de clase, no '/':
+      AKO/A  → AKO-A
+      UHAL/B → UHAL-B
+      FTW/U  → FTW-U
+
+    La barra '/' en una URL HTTP se interpreta como separador de ruta,
+    lo que causa que Yahoo devuelva 500 o respuestas inválidas.
+    """
+    return symbol.replace("/", "-")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Reintentos con backoff exponencial (anti rate-limit 401 / 429)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _ejecutar_con_reintento(fn, *args, **kwargs):
+    """Ejecuta fn() con reintentos ante errores de rate-limit de Yahoo.
+
+    Estrategia:
+      - Intento 1: inmediato
+      - Intento 2: pausa 2 s
+      - Intento 3: pausa 4 s
+    Solo reintenta ante 401 / 429 / 'Invalid Crumb' / 'Too Many Requests'.
+    Otros errores se propagan inmediatamente.
+    """
+    _SEÑALES_RATE_LIMIT = ("401", "429", "invalid crumb", "too many requests", "unauthorized")
+
+    for intento in range(_MAX_REINTENTOS):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            es_rate_limit = any(s in msg for s in _SEÑALES_RATE_LIMIT)
+
+            if es_rate_limit and intento < _MAX_REINTENTOS - 1:
+                pausa = _PAUSA_BASE_SEG * (2 ** intento)
+                logger.debug(
+                    "Rate-limit detectado (intento %d/%d) — pausando %.0fs antes de reintentar",
+                    intento + 1, _MAX_REINTENTOS, pausa,
+                )
+                time.sleep(pausa)
+                continue
+            raise   # reintento agotado o error distinto → propagar
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -116,12 +208,21 @@ def _fetch_fundamentales_finviz(symbol: str) -> tuple[str, dict]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _fetch_info_yfinance(symbol: str) -> tuple[str, dict]:
-    """Obtiene fundamentales de un símbolo vía yfinance. Thread-safe."""
+    """Obtiene fundamentales de un símbolo vía yfinance. Thread-safe.
+
+    Aplica normalización de símbolo (AKO/A → AKO-A) y reintentos ante
+    rate-limiting de Yahoo Finance.
+    """
+    symbol_yahoo = _normalizar_simbolo_yahoo(symbol)
     try:
         import yfinance as yf
 
-        ticker = yf.Ticker(symbol)
-        info = ticker.info or {}
+        def _llamar():
+            kwargs = {"session": _YF_SESSION} if _YF_SESSION is not None else {}
+            ticker = yf.Ticker(symbol_yahoo, **kwargs)
+            return ticker.info or {}, ticker
+
+        info, ticker = _ejecutar_con_reintento(_llamar)
 
         # short_interest: yfinance devuelve decimal (0.05 = 5%) → convertir a %
         short_pct_raw = info.get("shortPercentOfFloat")
@@ -238,16 +339,35 @@ def _fetch_info(symbol: str) -> tuple[str, dict]:
 
 
 def _fetch_volumen_extendido(symbol: str) -> tuple[str, dict]:
-    """Obtiene volumen pre/post-market vía yfinance (barras de 1 min con prepost=True)."""
+    """Obtiene volumen pre/post-market vía yfinance (barras de 1 min con prepost=True).
+
+    Aplica normalización de símbolo (AKO/A → AKO-A) y reintentos ante
+    rate-limiting. Maneja columnas MultiIndex de yfinance >= 0.2.36.
+    """
+    symbol_yahoo = _normalizar_simbolo_yahoo(symbol)
     try:
+        import pandas as pd
         import yfinance as yf
 
-        df = yf.download(
-            symbol, period="1d", interval="1m",
-            prepost=True, auto_adjust=True, progress=False,
-        )
+        def _descargar():
+            kwargs = {}
+            if _YF_SESSION is not None:
+                yf.set_session(_YF_SESSION)
+            return yf.download(
+                symbol_yahoo, period="1d", interval="1m",
+                prepost=True, auto_adjust=True, progress=False,
+            )
+
+        df = _ejecutar_con_reintento(_descargar)
+
         if df.empty:
             return symbol, {}
+
+        # yfinance >= 0.2.36 retorna columnas MultiIndex [("Volume", "AAPL"), ...]
+        # incluso para un solo ticker. Aplanamos al primer nivel para acceder
+        # como df["Volume"] y obtener una Series, no un DataFrame.
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
         # Normalizar índice a ET
         if df.index.tz is None:

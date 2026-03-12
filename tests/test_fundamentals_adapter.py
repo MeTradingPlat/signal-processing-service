@@ -1,7 +1,8 @@
 """Tests para fundamentals_adapter.
 
 Verifica: batch fetching, conversión de unidades, manejo de errores,
-mercados sin fundamentales (CRYPTO/FOREX).
+mercados sin fundamentales (CRYPTO/FOREX), normalización de símbolos,
+reintentos ante rate-limit y sesión cacheada.
 """
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -17,6 +18,8 @@ from app.adapters.fundamentals_adapter import (
     _calcular_dias_earnings,
     _parse_finviz_numero,
     _parse_finviz_porcentaje,
+    _normalizar_simbolo_yahoo,
+    _ejecutar_con_reintento,
 )
 
 
@@ -82,6 +85,10 @@ class TestCalcularDiasEarnings:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class TestFetchInfo:
+    """Aisla completamente ambas fuentes (finviz + yfinance) para que los tests
+    no dependan de la red ni de si finvizfinance está instalado."""
+
+    _finviz_sin_datos = {"side_effect": Exception("finviz not available")}
 
     def test_retorna_fundamentales_basicos(self):
         hoy = date.today()
@@ -96,7 +103,8 @@ class TestFetchInfo:
         mock_ticker = _ticker_mock(info)
         mock_ticker.calendar = None
 
-        with patch("yfinance.Ticker", return_value=mock_ticker):
+        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+             patch("yfinance.Ticker", return_value=mock_ticker):
             sym, datos = _fetch_info("AAPL")
 
         assert sym == "AAPL"
@@ -112,21 +120,25 @@ class TestFetchInfo:
         info = {"shortPercentOfFloat": 0.055}
         mock_ticker = _ticker_mock(info)
         mock_ticker.calendar = None
-        with patch("yfinance.Ticker", return_value=mock_ticker):
+        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+             patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("TEST")
         assert datos["short_interest"] == pytest.approx(5.5)
 
-    def test_retorna_dict_vacio_si_yfinance_falla(self):
-        with patch("yfinance.Ticker", side_effect=Exception("Blocked")):
+    def test_retorna_dict_vacio_si_ambas_fuentes_fallan(self):
+        """Si yfinance falla y finviz no tiene datos, retorna dict vacío."""
+        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+             patch("yfinance.Ticker", side_effect=Exception("Blocked")):
             sym, datos = _fetch_info("FAIL")
         assert sym == "FAIL"
         assert datos == {}
 
     def test_campos_ausentes_si_info_incompleta(self):
-        """Con info vacía, el orquestador filtra los None: no hay campos en el resultado."""
+        """Con info vacía y finviz sin datos, el orquestador retorna dict vacío."""
         mock_ticker = _ticker_mock({})  # info vacía → todos los campos son None
         mock_ticker.calendar = None
-        with patch("yfinance.Ticker", return_value=mock_ticker):
+        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+             patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("EMPTY")
         # El orquestador filtra valores None, así que el dict queda vacío
         assert datos == {}
@@ -201,6 +213,38 @@ class TestObtenerVolumenExtendidoBatch:
         with patch("yfinance.download", side_effect=Exception("Timeout")):
             resultado = obtener_volumen_extendido_batch(["AAPL"], "NYSE", max_workers=1)
         assert resultado.get("AAPL", {}) == {}
+
+    def test_columnas_multiindex_son_aplanadas(self):
+        """yfinance >= 0.2.36 retorna columnas MultiIndex para un solo ticker.
+        El adaptador debe aplanarlas para poder acceder a 'Volume' como Series."""
+        import pandas as pd
+
+        # Simular DataFrame con MultiIndex como retorna yfinance nuevo
+        idx = pd.date_range(
+            "2024-01-15 04:00", periods=6, freq="1min",
+            tz="America/New_York",
+        )
+        cols = pd.MultiIndex.from_tuples([("Open", "AAPL"), ("Volume", "AAPL")])
+        # 2 barras pre-market (04:00–09:30), 2 durante sesión, 2 post-market (>= 16:00)
+        # pre_vol = 1000 + 2000 = 3000 | post_vol = 0 (ninguna barra >= 16:00 en idx)
+        data = [
+            [100, 1_000],
+            [101, 2_000],
+            [102, 3_000],
+            [103, 4_000],
+            [104, 5_000],
+            [105, 6_000],
+        ]
+        df_multi = pd.DataFrame(data, index=idx, columns=cols)
+
+        with patch("yfinance.download", return_value=df_multi):
+            resultado = obtener_volumen_extendido_batch(["AAPL"], "NYSE", max_workers=1)
+
+        assert "AAPL" in resultado
+        datos = resultado["AAPL"]
+        # Debe retornar enteros, no lanzar TypeError
+        assert isinstance(datos.get("pre_market_volume"), int)
+        assert isinstance(datos.get("post_market_volume"), int)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -417,3 +461,121 @@ class TestFetchInfoOrquestador:
             _, datos = _fetch_info("BAD")
 
         assert datos == {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests: _normalizar_simbolo_yahoo (Anti-ban: '/' → '-')
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestNormalizarSimboloYahoo:
+    """Yahoo Finance usa '-' como separador de clase, no '/'."""
+
+    def test_convierte_barra_a_guion(self):
+        assert _normalizar_simbolo_yahoo("AKO/A")  == "AKO-A"
+        assert _normalizar_simbolo_yahoo("UHAL/B") == "UHAL-B"
+        assert _normalizar_simbolo_yahoo("FTW/U")  == "FTW-U"
+
+    def test_simbolo_normal_no_cambia(self):
+        assert _normalizar_simbolo_yahoo("AAPL")  == "AAPL"
+        assert _normalizar_simbolo_yahoo("MSFT")  == "MSFT"
+        assert _normalizar_simbolo_yahoo("BTC-USD") == "BTC-USD"
+
+    def test_simbolo_yfinance_usa_simbolo_normalizado(self):
+        """_fetch_info_yfinance debe llamar a yf.Ticker con el símbolo normalizado."""
+        mock_ticker = MagicMock()
+        mock_ticker.info = {}
+        mock_ticker.calendar = None
+
+        with patch("yfinance.Ticker", return_value=mock_ticker) as mock_yf:
+            _fetch_info_yfinance("AKO/A")
+
+        # yfinance debe recibir "AKO-A", no "AKO/A"
+        llamado_con = mock_yf.call_args[0][0]
+        assert llamado_con == "AKO-A"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests: _ejecutar_con_reintento (Anti-ban: backoff exponencial)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestEjecutarConReintento:
+    """Verifica la lógica de reintentos ante rate-limit de Yahoo."""
+
+    def test_exito_a_la_primera_no_reintenta(self):
+        llamadas = []
+        def fn():
+            llamadas.append(1)
+            return "ok"
+
+        resultado = _ejecutar_con_reintento(fn)
+        assert resultado == "ok"
+        assert len(llamadas) == 1
+
+    def test_reintenta_ante_error_401(self):
+        """Debe reintentar hasta 3 veces ante errores de rate-limit."""
+        intentos = []
+
+        def fn():
+            intentos.append(1)
+            if len(intentos) < 3:
+                raise Exception("HTTP 401 Unauthorized: Invalid Crumb")
+            return "ok_en_3er_intento"
+
+        with patch("time.sleep"):   # evitar esperar en tests
+            resultado = _ejecutar_con_reintento(fn)
+
+        assert resultado == "ok_en_3er_intento"
+        assert len(intentos) == 3
+
+    def test_reintenta_ante_error_429(self):
+        intentos = []
+
+        def fn():
+            intentos.append(1)
+            if len(intentos) < 2:
+                raise Exception("HTTP 429 Too Many Requests")
+            return "ok"
+
+        with patch("time.sleep"):
+            resultado = _ejecutar_con_reintento(fn)
+
+        assert resultado == "ok"
+        assert len(intentos) == 2
+
+    def test_no_reintenta_errores_distintos_a_rate_limit(self):
+        """Errores como 404 o de red no deben reintentarse."""
+        intentos = []
+
+        def fn():
+            intentos.append(1)
+            raise ValueError("Symbol not found")
+
+        with pytest.raises(ValueError):
+            _ejecutar_con_reintento(fn)
+
+        assert len(intentos) == 1   # no reintentó
+
+    def test_agota_reintentos_y_propaga_excepcion(self):
+        """Si los 3 intentos fallan por rate-limit, propaga la excepción."""
+        def fn():
+            raise Exception("401 Invalid Crumb")
+
+        with patch("time.sleep"), pytest.raises(Exception, match="401"):
+            _ejecutar_con_reintento(fn)
+
+    def test_pausa_entre_reintentos(self):
+        """Verifica que se llama a time.sleep con backoff exponencial."""
+        intentos = []
+
+        def fn():
+            intentos.append(1)
+            if len(intentos) < 3:
+                raise Exception("401 Unauthorized")
+            return "ok"
+
+        with patch("time.sleep") as mock_sleep:
+            _ejecutar_con_reintento(fn)
+
+        pausas = [call.args[0] for call in mock_sleep.call_args_list]
+        assert pausas[0] == pytest.approx(2.0)   # 2s primer reintento
+        assert pausas[1] == pytest.approx(4.0)   # 4s segundo reintento

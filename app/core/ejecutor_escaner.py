@@ -46,6 +46,7 @@ class EjecutorEscaner:
         self._contextos: dict[str, ContextoSimbolo] = {}
         self._activo = True
         self._ultima_fecha_fundamentales: date | None = None
+        self._ultimo_conteo_filtrado: int | None = None  # Para evitar logs redundantes
 
     async def ejecutar(self):
         """Método principal ejecutado como asyncio.Task."""
@@ -110,7 +111,8 @@ class EjecutorEscaner:
                 )
                 await self._kafka.publicar_log(
                     escaner.id_escaner, "INFO",
-                    f"Escáner {escaner.nombre}: sesión finalizada, reanuda el {siguiente} a las {escaner.hora_inicio}",
+                    f"Escáner {escaner.nombre}: sesión finalizada. Próximo inicio programado para el {siguiente} a las {escaner.hora_inicio} UTC",
+                    categoria="LIFECYCLE"
                 )
                 await gt.dormir_hasta(objetivo)
 
@@ -239,6 +241,11 @@ class EjecutorEscaner:
             return False
 
         logger.info("Escaner %d: %d símbolos cargados para la sesión", escaner.id_escaner, len(simbolos))
+        await self._kafka.publicar_log(
+            escaner.id_escaner, "INFO",
+            f"Fase 1: Lista de símbolos obtenida ({len(simbolos)} activos). Iniciando carga de fundamentales...",
+            categoria="INITIALIZATION"
+        )
 
         await self._refrescar_fundamentales(simbolos)
 
@@ -265,15 +272,24 @@ class EjecutorEscaner:
         if not self._fundamentals_cache or not simbolos:
             return
         mercado = self._escaner.mercados[0] if self._escaner.mercados else "NYSE"
-        await self._fundamentals_cache.refrescar(simbolos, mercado)
         # Actualizar contextos en memoria con los nuevos fundamentales
+        con_datos = 0
         for sym in simbolos:
             if sym in self._contextos:
-                self._contextos[sym].fundamentales = self._fundamentals_cache.obtener(sym)
+                fund = self._fundamentals_cache.obtener(sym)
+                self._contextos[sym].fundamentales = fund
+                if fund:
+                    con_datos += 1
+
         self._ultima_fecha_fundamentales = datetime.now(timezone.utc).date()
         logger.debug(
             "Escaner %d: fundamentales actualizados para %d símbolos",
             self._escaner.id_escaner, len(simbolos),
+        )
+        await self._kafka.publicar_log(
+            escaner.id_escaner, "INFO",
+            f"Fase 2: Fundamentales cargados. {con_datos} símbolos con información, {len(simbolos) - con_datos} ignorados por falta de datos.",
+            categoria="INITIALIZATION"
         )
 
     async def _evaluar_y_publicar(self):
@@ -320,6 +336,21 @@ class EjecutorEscaner:
         except Exception as e:
             logger.error("Error evaluando filtros para escaner %d: %s", escaner.id_escaner, e)
             return
+
+        # --- GESTIÓN DE LOGS DE FILTRADO (SOLO EN CAMBIO) ---
+        simbolos_que_pasaron = [s["symbol"] for s in senales if s.get("tipoSenal") == "ALERTA_FILTROS"]
+        conteo_actual = len(simbolos_que_pasaron)
+        
+        # Enviar lista de símbolos filtrados al topic de frontend
+        await self._kafka.publicar_simbolos_filtrados(escaner.id_escaner, simbolos_que_pasaron)
+
+        if conteo_actual != self._ultimo_conteo_filtrado:
+            await self._kafka.publicar_log(
+                escaner.id_escaner, "INFO",
+                f"Fase de Evaluación: {conteo_actual} símbolos cumplen con las estrategias actualmente.",
+                categoria="EVALUATION"
+            )
+            self._ultimo_conteo_filtrado = conteo_actual
 
         for senal in senales:
             senal["timestamp"] = datetime.now(timezone.utc).isoformat()

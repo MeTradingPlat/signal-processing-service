@@ -88,8 +88,6 @@ class TestFetchInfo:
     """Aisla completamente ambas fuentes (finviz + yfinance) para que los tests
     no dependan de la red ni de si finvizfinance está instalado."""
 
-    _finviz_sin_datos = {"side_effect": Exception("finviz not available")}
-
     def test_retorna_fundamentales_basicos(self):
         hoy = date.today()
         info = {
@@ -103,7 +101,7 @@ class TestFetchInfo:
         mock_ticker = _ticker_mock(info)
         mock_ticker.calendar = None
 
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("AAPL", {})), \
              patch("yfinance.Ticker", return_value=mock_ticker):
             sym, datos = _fetch_info("AAPL")
 
@@ -120,14 +118,14 @@ class TestFetchInfo:
         info = {"shortPercentOfFloat": 0.055}
         mock_ticker = _ticker_mock(info)
         mock_ticker.calendar = None
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("TEST", {})), \
              patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("TEST")
         assert datos["short_interest"] == pytest.approx(5.5)
 
     def test_retorna_dict_vacio_si_ambas_fuentes_fallan(self):
         """Si yfinance falla y finviz no tiene datos, retorna dict vacío."""
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("FAIL", {})), \
              patch("yfinance.Ticker", side_effect=Exception("Blocked")):
             sym, datos = _fetch_info("FAIL")
         assert sym == "FAIL"
@@ -137,7 +135,7 @@ class TestFetchInfo:
         """Con info vacía y finviz sin datos, el orquestador retorna dict vacío."""
         mock_ticker = _ticker_mock({})  # info vacía → todos los campos son None
         mock_ticker.calendar = None
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("EMPTY", {})), \
              patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("EMPTY")
         # El orquestador filtra valores None, así que el dict queda vacío
@@ -321,22 +319,36 @@ class TestParseFinvizPorcentaje:
 
 class TestFetchFundamentalesFinviz:
 
-    def _mock_finviz(self, fundament_dict: dict):
-        """Crea mock de finvizfinance que retorna el dict dado."""
-        mock_stock = MagicMock()
-        mock_stock.ticker_fundament.return_value = fundament_dict
-        return MagicMock(return_value=mock_stock)
+    def _mock_httpx(self, html_content: str, status_code: int = 200):
+        mock_resp = MagicMock()
+        mock_resp.status_code = status_code
+        mock_resp.text = html_content
+        
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__.return_value = None
+        mock_client.get.return_value = mock_resp
+        return mock_client
 
     def test_parsea_datos_completos(self):
-        fundament = {
-            "Float": "15.44B",
-            "Shs Outstand": "16.50B",
-            "Market Cap": "3.42T",
-            "Short Float": "2.35%",
-            "Short Ratio": "3.2",
-        }
-        mock_class = self._mock_finviz(fundament)
-        with patch("finvizfinance.quote.finvizfinance", mock_class):
+        html = """
+        <html><table class="snapshot-table2">
+            <tr>
+                <td>Shs Float</td><td>15.44B</td>
+                <td>Shs Outstand</td><td>16.50B</td>
+            </tr>
+            <tr>
+                <td>Market Cap</td><td>3.42T</td>
+                <td>Short Float</td><td>2.35%</td>
+            </tr>
+            <tr>
+                <td>Short Ratio</td><td>3.2</td>
+                <td>Rel Volume</td><td>1.5</td>
+            </tr>
+        </table></html>
+        """
+        mock_client = self._mock_httpx(html)
+        with patch("httpx.Client", return_value=mock_client), patch("time.sleep"):
             sym, datos = _fetch_fundamentales_finviz("AAPL")
 
         assert sym == "AAPL"
@@ -347,26 +359,36 @@ class TestFetchFundamentalesFinviz:
         assert datos["short_ratio"] == pytest.approx(3.2)
 
     def test_campos_con_guion_son_none(self):
-        fundament = {
-            "Float": "15.44B",
-            "Shs Outstand": "-",
-            "Market Cap": "-",
-            "Short Float": "-",
-            "Short Ratio": "3.2",
-        }
-        mock_class = self._mock_finviz(fundament)
-        with patch("finvizfinance.quote.finvizfinance", mock_class):
+        html = """
+        <html><table class="snapshot-table2">
+            <tr>
+                <td>Shs Float</td><td>15.44B</td>
+                <td>Shs Outstand</td><td>-</td>
+            </tr>
+            <tr>
+                <td>Market Cap</td><td>-</td>
+                <td>Short Float</td><td>-</td>
+            </tr>
+            <tr>
+                <td>Short Ratio</td><td>3.2</td>
+                <td>Rel Volume</td><td>1.5</td>
+            </tr>
+        </table></html>
+        """
+        mock_client = self._mock_httpx(html)
+        with patch("httpx.Client", return_value=mock_client), patch("time.sleep"):
             _, datos = _fetch_fundamentales_finviz("TEST")
 
         assert datos["float_shares"] is not None
-        assert datos["shares_outstanding"] is None
-        assert datos["market_cap"] is None
-        assert datos["short_interest"] is None
+        assert datos.get("shares_outstanding") is None
+        assert datos.get("market_cap") is None
+        assert datos.get("short_interest") is None
         assert datos["short_ratio"] is not None
 
     def test_excepcion_retorna_dict_vacio(self):
-        """Si finviz lanza excepción (símbolo OTC no encontrado), retorna {}."""
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Not found")):
+        """Si finviz lanza excepción (símbolo OTC no encontrado o 404), retorna {}."""
+        mock_client = self._mock_httpx("", 404)
+        with patch("httpx.Client", return_value=mock_client), patch("time.sleep"):
             sym, datos = _fetch_fundamentales_finviz("OTCSYM")
 
         assert sym == "OTCSYM"
@@ -380,19 +402,13 @@ class TestFetchFundamentalesFinviz:
 class TestFetchInfoOrquestador:
     """Verifica la lógica de prioridad: finviz primario, yfinance fallback."""
 
-    def _mock_finviz_class(self, fundament_dict: dict):
-        mock_stock = MagicMock()
-        mock_stock.ticker_fundament.return_value = fundament_dict
-        return MagicMock(return_value=mock_stock)
-
     def test_finviz_sobreescribe_yfinance_para_campos_comunes(self):
         """Finviz tiene market_cap más preciso: debe ganar sobre yfinance."""
-        fundament = {
-            "Float": "100M",     # 100_000_000 (finviz)
-            "Shs Outstand": "-",
-            "Market Cap": "5B",  # 5_000_000_000 (finviz)
-            "Short Float": "5%",
-            "Short Ratio": "2.0",
+        finviz_data = {
+            "float_shares": 100_000_000.0,
+            "market_cap": 5_000_000_000.0,
+            "short_interest": 5.0,
+            "short_ratio": 2.0,
         }
         yf_info = {
             "floatShares": 90_000_000,      # yfinance (menos preciso)
@@ -403,9 +419,8 @@ class TestFetchInfoOrquestador:
         }
         mock_ticker = _ticker_mock(yf_info)
         mock_ticker.calendar = None
-        mock_finviz = self._mock_finviz_class(fundament)
 
-        with patch("finvizfinance.quote.finvizfinance", mock_finviz), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("AAPL", finviz_data)), \
              patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("AAPL")
 
@@ -414,19 +429,17 @@ class TestFetchInfoOrquestador:
         assert datos["market_cap"] == pytest.approx(5_000_000_000.0)
         assert datos["short_interest"] == pytest.approx(5.0)
         assert datos["short_ratio"] == pytest.approx(2.0)
-        # yfinance gana donde finviz tiene "-"
+        # yfinance gana donde finviz no devolvió data (ej. outstanding)
         assert datos["shares_outstanding"] == 110_000_000
 
     def test_days_until_earnings_siempre_de_yfinance(self):
         """Incluso si finviz funciona, days_until_earnings viene de yfinance."""
-        fundament = {"Float": "50M", "Shs Outstand": "-", "Market Cap": "-",
-                     "Short Float": "-", "Short Ratio": "-"}
+        finviz_data = {"float_shares": 50_000_000.0}
         yf_info = {"nextEarningsDate": date.today() + timedelta(days=10)}
         mock_ticker = _ticker_mock(yf_info)
         mock_ticker.calendar = None
-        mock_finviz = self._mock_finviz_class(fundament)
 
-        with patch("finvizfinance.quote.finvizfinance", mock_finviz), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("AAPL", finviz_data)), \
              patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("AAPL")
 
@@ -444,7 +457,7 @@ class TestFetchInfoOrquestador:
         mock_ticker = _ticker_mock(yf_info)
         mock_ticker.calendar = None
 
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("OTC not found")), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("OTCSYM", {})), \
              patch("yfinance.Ticker", return_value=mock_ticker):
             _, datos = _fetch_info("OTCSYM")
 
@@ -456,7 +469,7 @@ class TestFetchInfoOrquestador:
 
     def test_ambos_fallan_retorna_dict_vacio(self):
         """Si finviz y yfinance fallan, retorna dict vacío (permisivo en filtros)."""
-        with patch("finvizfinance.quote.finvizfinance", side_effect=Exception("Error")), \
+        with patch("app.adapters.fundamentals_adapter._fetch_fundamentales_finviz", return_value=("BAD", {})), \
              patch("yfinance.Ticker", side_effect=Exception("Error")):
             _, datos = _fetch_info("BAD")
 

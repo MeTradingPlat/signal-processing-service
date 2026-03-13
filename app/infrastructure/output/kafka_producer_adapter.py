@@ -10,6 +10,7 @@ SERVICIO_ORIGEN = "signal-processing-service"
 TOPIC_SIGNALS = "signals"
 TOPIC_LOGS = "logs.notifications"
 TOPIC_SCANNER_STATE = "scanner.state"
+TOPIC_FILTERED_SYMBOLS = "scanner.filtered_symbols"
 
 
 class KafkaProducerAdapter:
@@ -92,3 +93,19 @@ class KafkaProducerAdapter:
             )
         except Exception as e:
             logger.error("Error publicando cambio de estado: %s", e)
+    async def publicar_simbolos_filtrados(
+        self,
+        id_escaner: int,
+        simbolos: list[str],
+    ):
+        """Publica la lista actual de símbolos que pasaron los filtros."""
+        evento = {
+            "idEscaner": id_escaner,
+            "simbolos": simbolos,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "servicioOrigen": SERVICIO_ORIGEN,
+        }
+        try:
+            await self._producer.send_and_wait(TOPIC_FILTERED_SYMBOLS, value=evento)
+        except Exception as e:
+            logger.error("Error publicando símbolos filtrados: %s", e)

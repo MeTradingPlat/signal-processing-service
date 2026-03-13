@@ -1,0 +1,93 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\contr\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\proyectos\metradingplat\signal-processing-service
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 52 items
+
+tests/test_fundamentals_adapter.py::TestCalcularDiasEarnings::test_retorna_dias_desde_info_nextEarningsDate PASSED [  1%]
+tests/test_fundamentals_adapter.py::TestCalcularDiasEarnings::test_retorna_none_si_fecha_pasada PASSED [  3%]
+tests/test_fundamentals_adapter.py::TestCalcularDiasEarnings::test_retorna_dias_desde_calendar_dict PASSED [  5%]
+tests/test_fundamentals_adapter.py::TestCalcularDiasEarnings::test_retorna_none_si_no_hay_fecha PASSED [  7%]
+tests/test_fundamentals_adapter.py::TestCalcularDiasEarnings::test_maneja_excepcion_en_calendar PASSED [  9%]
+tests/test_fundamentals_adapter.py::TestFetchInfo::test_retorna_fundamentales_basicos FAILED [ 11%]
+tests/test_fundamentals_adapter.py::TestFetchInfo::test_short_interest_convertido_a_porcentaje PASSED [ 13%]
+tests/test_fundamentals_adapter.py::TestFetchInfo::test_retorna_dict_vacio_si_ambas_fuentes_fallan PASSED [ 15%]
+tests/test_fundamentals_adapter.py::TestFetchInfo::test_campos_ausentes_si_info_incompleta PASSED [ 17%]
+tests/test_fundamentals_adapter.py::TestObtenerFundamentalesBatch::test_retorna_dict_vacio_para_crypto PASSED [ 19%]
+tests/test_fundamentals_adapter.py::TestObtenerFundamentalesBatch::test_retorna_dict_vacio_para_forex PASSED [ 21%]
+tests/test_fundamentals_adapter.py::TestObtenerFundamentalesBatch::test_retorna_dict_vacio_si_lista_vacia PASSED [ 23%]
+tests/test_fundamentals_adapter.py::TestObtenerFundamentalesBatch::test_batch_multiples_simbolos PASSED [ 25%]
+tests/test_fundamentals_adapter.py::TestObtenerFundamentalesBatch::test_simbolo_con_error_retorna_dict_vacio PASSED [ 26%]
+tests/test_fundamentals_adapter.py::TestObtenerVolumenExtendidoBatch::test_retorna_vacio_para_crypto PASSED [ 28%]
+tests/test_fundamentals_adapter.py::TestObtenerVolumenExtendidoBatch::test_retorna_vacio_lista_vacia PASSED [ 30%]
+tests/test_fundamentals_adapter.py::TestObtenerVolumenExtendidoBatch::test_error_en_download_retorna_vacio PASSED [ 32%]
+tests/test_fundamentals_adapter.py::TestObtenerVolumenExtendidoBatch::test_columnas_multiindex_son_aplanadas PASSED [ 34%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_parsea_billones PASSED [ 36%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_parsea_trillones PASSED [ 38%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_parsea_millones PASSED [ 40%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_parsea_miles PASSED [ 42%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_parsea_sin_sufijo PASSED [ 44%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_parsea_con_comas PASSED [ 46%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_guion_retorna_none PASSED [ 48%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_na_retorna_none PASSED [ 50%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_vacio_retorna_none PASSED [ 51%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_none_retorna_none PASSED [ 53%]
+tests/test_fundamentals_adapter.py::TestParseFinvizNumero::test_invalido_retorna_none PASSED [ 55%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_parsea_porcentaje_con_simbolo PASSED [ 57%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_parsea_porcentaje_entero PASSED [ 59%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_parsea_sin_simbolo PASSED [ 61%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_guion_retorna_none PASSED [ 63%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_na_retorna_none PASSED [ 65%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_vacio_retorna_none PASSED [ 67%]
+tests/test_fundamentals_adapter.py::TestParseFinvizPorcentaje::test_none_retorna_none PASSED [ 69%]
+tests/test_fundamentals_adapter.py::TestFetchFundamentalesFinviz::test_parsea_datos_completos FAILED [ 71%]
+tests/test_fundamentals_adapter.py::TestFetchFundamentalesFinviz::test_campos_con_guion_son_none FAILED [ 73%]
+tests/test_fundamentals_adapter.py::TestFetchFundamentalesFinviz::test_excepcion_retorna_dict_vacio PASSED [ 75%]
+tests/test_fundamentals_adapter.py::TestFetchInfoOrquestador::test_finviz_sobreescribe_yfinance_para_campos_comunes FAILED [ 76%]
+tests/test_fundamentals_adapter.py::TestFetchInfoOrquestador::test_days_until_earnings_siempre_de_yfinance PASSED [ 78%]
+tests/test_fundamentals_adapter.py::TestFetchInfoOrquestador::test_finviz_falla_yfinance_es_fallback_completo PASSED [ 80%]
+tests/test_fundamentals_adapter.py::TestFetchInfoOrquestador::test_ambos_fallan_retorna_dict_vacio PASSED [ 82%]
+tests/test_fundamentals_adapter.py::TestNormalizarSimboloYahoo::test_convierte_barra_a_guion PASSED [ 84%]
+tests/test_fundamentals_adapter.py::TestNormalizarSimboloYahoo::test_simbolo_normal_no_cambia PASSED [ 86%]
+tests/test_fundamentals_adapter.py::TestNormalizarSimboloYahoo::test_simbolo_yfinance_usa_simbolo_normalizado PASSED [ 88%]
+tests/test_fundamentals_adapter.py::TestEjecutarConReintento::test_exito_a_la_primera_no_reintenta PASSED [ 90%]
+tests/test_fundamentals_adapter.py::TestEjecutarConReintento::test_reintenta_ante_error_401 PASSED [ 92%]
+tests/test_fundamentals_adapter.py::TestEjecutarConReintento::test_reintenta_ante_error_429 PASSED [ 94%]
+tests/test_fundamentals_adapter.py::TestEjecutarConReintento::test_no_reintenta_errores_distintos_a_rate_limit PASSED [ 96%]
+tests/test_fundamentals_adapter.py::TestEjecutarConReintento::test_agota_reintentos_y_propaga_excepcion PASSED [ 98%]
+tests/test_fundamentals_adapter.py::TestEjecutarConReintento::test_pausa_entre_reintentos PASSED [100%]
+
+================================== FAILURES ===================================
+______________ TestFetchInfo.test_retorna_fundamentales_basicos _______________
+tests\test_fundamentals_adapter.py:111: in test_retorna_fundamentales_basicos
+    assert datos["float_shares"] == 15_000_000
+E   assert 14660000000.0 == 15000000
+__________ TestFetchFundamentalesFinviz.test_parsea_datos_completos ___________
+tests\test_fundamentals_adapter.py:343: in test_parsea_datos_completos
+    assert datos["float_shares"] == pytest.approx(15_440_000_000.0)
+E   assert 14660000000.0 == 15440000000.0 ± 1.5e+04
+E     
+E     comparison failed
+E     Obtained: 14660000000.0
+E     Expected: 15440000000.0 ± 1.5e+04
+_________ TestFetchFundamentalesFinviz.test_campos_con_guion_son_none _________
+tests\test_fundamentals_adapter.py:361: in test_campos_con_guion_son_none
+    assert datos["float_shares"] is not None
+           ^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'float_shares'
+_ TestFetchInfoOrquestador.test_finviz_sobreescribe_yfinance_para_campos_comunes _
+tests\test_fundamentals_adapter.py:413: in test_finviz_sobreescribe_yfinance_para_campos_comunes
+    assert datos["float_shares"] == pytest.approx(100_000_000.0)
+E   assert 14660000000.0 == 100000000.0 ± 100
+E     
+E     comparison failed
+E     Obtained: 14660000000.0
+E     Expected: 100000000.0 ± 100
+=========================== short test summary info ===========================
+FAILED tests/test_fundamentals_adapter.py::TestFetchInfo::test_retorna_fundamentales_basicos
+FAILED tests/test_fundamentals_adapter.py::TestFetchFundamentalesFinviz::test_parsea_datos_completos
+FAILED tests/test_fundamentals_adapter.py::TestFetchFundamentalesFinviz::test_campos_con_guion_son_none
+FAILED tests/test_fundamentals_adapter.py::TestFetchInfoOrquestador::test_finviz_sobreescribe_yfinance_para_campos_comunes
+======================== 4 failed, 48 passed in 34.49s ========================

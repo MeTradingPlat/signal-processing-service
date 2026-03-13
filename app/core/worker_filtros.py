@@ -176,7 +176,7 @@ def _evaluar_volumen_post_pre(df: pd.DataFrame, parametros: list[dict]) -> bool:
         vol = pre_vol + post_vol
 
     if vol == 0 and pre_vol == 0 and post_vol == 0 and "pre_market_volume" not in fund:
-        return True  # sin datos en caché → permisivo
+        return False  # sin datos en caché → restrictivo (se descarta)
 
     return evaluar_condicional(float(vol), cond)
 
@@ -782,7 +782,7 @@ def _evaluar_fundamental_numerico(
         return True
     valor = _leer_fundamental(df, clave)
     if valor is None:
-        return True  # sin datos → permisivo
+        return False  # sin datos → restrictivo (se descarta)
     return evaluar_condicional(float(valor), cond)
 
 

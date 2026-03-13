@@ -33,12 +33,23 @@ Anti-ban (Yahoo Finance):
 from __future__ import annotations
 
 import logging
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import httpx
+from bs4 import BeautifulSoup
+
 logger = logging.getLogger(__name__)
+
+# User-Agents para evadir bloqueos por defecto
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0",
+]
 
 _ET = ZoneInfo("America/New_York")
 _MAX_WORKERS_YFINANCE = 4   # Reducido (era 10) — menos concurrencia = menos ban
@@ -182,24 +193,57 @@ def _parse_finviz_porcentaje(valor: str | None) -> float | None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _fetch_fundamentales_finviz(symbol: str) -> tuple[str, dict]:
-    """Obtiene fundamentales vía finvizfinance (fuente primaria). Thread-safe.
-
-    Retorna dict vacío si el símbolo no está en finviz (OTC sin cobertura,
-    error de red, etc.). En ese caso _fetch_info usará yfinance como fallback.
+    """Obtiene fundamentales scrapeando Finviz directamente con HTTPX.
+    
+    Evita la librería finvizfinance porque falla con sufijos y es detectada fácilmente.
     """
+    sym_finviz = symbol.replace("/", "-").replace(" ", "-")
+    url = f"https://finviz.com/quote.ashx?t={sym_finviz}"
+    
+    # Delay anti-rate-limit orgánico
+    time.sleep(random.uniform(0.5, 2.0))
+    
+    headers = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html",
+        "DNT": "1",
+    }
+    
     try:
-        from finvizfinance.quote import finvizfinance  # type: ignore[import]
+        with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+            resp = client.get(url, headers=headers)
+            
+        if resp.status_code != 200:
+            logger.debug("Finviz devolvió HTTP %d para %s", resp.status_code, symbol)
+            return symbol, {}
 
-        f = finvizfinance(symbol).ticker_fundament()
-        return symbol, {
-            "float_shares":       _parse_finviz_numero(f.get("Float")),
-            "shares_outstanding": _parse_finviz_numero(f.get("Shs Outstand")),
-            "market_cap":         _parse_finviz_numero(f.get("Market Cap")),
-            "short_interest":     _parse_finviz_porcentaje(f.get("Short Float")),
-            "short_ratio":        _parse_finviz_numero(f.get("Short Ratio")),
+        soup = BeautifulSoup(resp.text, "lxml")
+        tabla = soup.find("table", class_="snapshot-table2")
+        if not tabla:
+            return symbol, {}
+
+        extracted_data = {}
+        filas = tabla.find_all("tr")
+        for fila in filas:
+            celdas = fila.find_all("td")
+            for i in range(0, len(celdas), 2):
+                if i + 1 < len(celdas):
+                    llave = celdas[i].get_text(strip=True)
+                    valor = celdas[i+1].get_text(strip=True)
+                    extracted_data[llave] = valor
+
+        resultado = {
+            "float_shares":       _parse_finviz_numero(extracted_data.get("Shs Float", "-")),
+            "shares_outstanding": _parse_finviz_numero(extracted_data.get("Shs Outstand", "-")),
+            "market_cap":         _parse_finviz_numero(extracted_data.get("Market Cap", "-")),
+            "short_interest":     _parse_finviz_porcentaje(extracted_data.get("Short Float", "-")),
+            "short_ratio":        _parse_finviz_numero(extracted_data.get("Short Ratio", "-")),
         }
+        
+        return symbol, {k: v for k, v in resultado.items() if v is not None}
+        
     except Exception as exc:
-        logger.warning("Finviz error [%s]: %s", symbol, exc)
+        logger.warning("Finviz Scraper Falló [%s]: %s", symbol, exc)
         return symbol, {}
 
 
@@ -208,10 +252,8 @@ def _fetch_fundamentales_finviz(symbol: str) -> tuple[str, dict]:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _fetch_info_yfinance(symbol: str) -> tuple[str, dict]:
-    """Obtiene fundamentales de un símbolo vía yfinance. Thread-safe.
-
-    Aplica normalización de símbolo (AKO/A → AKO-A) y reintentos ante
-    rate-limiting de Yahoo Finance.
+    """Obtiene fundamentales de un símbolo vía yfinance de manera minimalista.
+    Diseñado para tolerar el error 401 de datacenter y abortar rápidamente.
     """
     symbol_yahoo = _normalizar_simbolo_yahoo(symbol)
     try:
@@ -224,11 +266,9 @@ def _fetch_info_yfinance(symbol: str) -> tuple[str, dict]:
 
         info, ticker = _ejecutar_con_reintento(_llamar)
 
-        # short_interest: yfinance devuelve decimal (0.05 = 5%) → convertir a %
         short_pct_raw = info.get("shortPercentOfFloat")
         short_interest = round(float(short_pct_raw) * 100, 2) if short_pct_raw is not None else None
 
-        # Earnings: intentar varias APIs de yfinance (cambian entre versiones)
         days_earnings = _calcular_dias_earnings(ticker, info)
 
         return symbol, {
@@ -240,7 +280,7 @@ def _fetch_info_yfinance(symbol: str) -> tuple[str, dict]:
             "days_until_earnings": days_earnings,
         }
     except Exception as exc:
-        logger.warning("yfinance error [%s]: %s", symbol, exc)
+        logger.debug("yf.info no disponible [%s]: %s", symbol, exc)
         return symbol, {}
 
 
@@ -311,13 +351,9 @@ def _fetch_info(symbol: str) -> tuple[str, dict]:
     """Fundamentales con estrategia dual: finviz primario + yfinance fallback.
 
     Lógica de prioridad:
-    1. Llama a finviz y yfinance para cada símbolo.
-    2. Base: yfinance (cobertura total, incluye OTC/ETF).
-    3. Sobrescribir con finviz donde tenga datos no-None (más confiables).
-    4. days_until_earnings: SIEMPRE de yfinance (finviz no lo provee).
-
-    Para OTC/ETF sin cobertura en finviz: finviz retorna dict vacío (excepción
-    capturada internamente) → resultado final es 100% yfinance.
+    1. Llama a finviz HTTP Scraper y a yfinance.
+    2. Usa yfinance como base.
+    3. Sobrescribe FINVIZ si trajo data (muy probable ya que bypassa el 404/401).
     """
     _, finviz_data = _fetch_fundamentales_finviz(symbol)
     _, yf_data     = _fetch_info_yfinance(symbol)
@@ -330,20 +366,53 @@ def _fetch_info(symbol: str) -> tuple[str, dict]:
         if valor is not None:
             resultado[clave] = valor
 
-    # days_until_earnings SIEMPRE de yfinance (finviz no lo provee de forma confiable)
+    # days_until_earnings SIEMPRE de yfinance porque en nuestro df no lo extrajimos de finviz
     due = yf_data.get("days_until_earnings")
     if due is not None:
         resultado["days_until_earnings"] = due
 
     return symbol, resultado
+    
+def _scrape_marketwatch_volumen(symbol: str) -> dict:
+    """Extrae el volumen pre y post market leyendo MarketWatch directamente."""
+    sym_mw = symbol.replace("-", ".").lower()
+    url = f"https://www.marketwatch.com/investing/stock/{sym_mw}"
+    
+    headers = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html",
+    }
+    
+    try:
+        with httpx.Client(timeout=8.0, follow_redirects=True) as client:
+            resp = client.get(url, headers=headers)
+        if resp.status_code != 200:
+            return {}
+            
+        soup = BeautifulSoup(resp.text, "lxml")
+        
+        # Marketwatch muestra extended hours volume en este DOM path standard (usualmente Intraday data)
+        vol_div = soup.find("div", class_="intraday__volume")
+        if not vol_div:
+            return {}
+            
+        vol_text = vol_div.find("span", class_="volume__value")
+        if vol_text:
+            parsed_vol = _parse_finviz_numero(vol_text.get_text(strip=True))
+            if parsed_vol:
+                # MW arroja el after/prehours consolidado, lo dividimos como fallback
+                return {
+                    "pre_market_volume": parsed_vol, 
+                    "post_market_volume": parsed_vol
+                }
+    except Exception as e:
+        logger.debug("Marketwatch fallo en %s (%s)", symbol, str(e))
+        
+    return {}
 
 
 def _fetch_volumen_extendido(symbol: str) -> tuple[str, dict]:
-    """Obtiene volumen pre/post-market vía yfinance (barras de 1 min con prepost=True).
-
-    Aplica normalización de símbolo (AKO/A → AKO-A) y reintentos ante
-    rate-limiting. Maneja columnas MultiIndex de yfinance >= 0.2.36.
-    """
+    """Obtiene volumen pre/post-market por Yahoo o Marketwatch scraper."""
     symbol_yahoo = _normalizar_simbolo_yahoo(symbol)
     try:
         import pandas as pd
@@ -361,34 +430,37 @@ def _fetch_volumen_extendido(symbol: str) -> tuple[str, dict]:
         df = _ejecutar_con_reintento(_descargar)
 
         if df.empty:
-            return symbol, {}
+            return symbol, _scrape_marketwatch_volumen(symbol)
 
-        # yfinance >= 0.2.36 retorna columnas MultiIndex [("Volume", "AAPL"), ...]
-        # incluso para un solo ticker. Aplanamos al primer nivel para acceder
-        # como df["Volume"] y obtener una Series, no un DataFrame.
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # Normalizar índice a ET
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC").tz_convert(_ET)
-        else:
-            df.index = df.index.tz_convert(_ET)
+        try:
+            # Fix del crash: Si el index no tiene tz_localize/convert o no es DatetimeIndex
+            # saltara excepcion. El fallback Scraper te salva aquí.
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC").tz_convert(_ET)
+            else:
+                df.index = df.index.tz_convert(_ET)
 
-        now_et = datetime.now(_ET)
-        market_open  = now_et.replace(hour=9,  minute=30, second=0, microsecond=0)
-        market_close = now_et.replace(hour=16, minute=0,  second=0, microsecond=0)
+            now_et = datetime.now(_ET)
+            market_open  = now_et.replace(hour=9,  minute=30, second=0, microsecond=0)
+            market_close = now_et.replace(hour=16, minute=0,  second=0, microsecond=0)
 
-        vol_col = "Volume"
-        pre_vol  = int(df.loc[df.index < market_open,  vol_col].sum())
-        post_vol = int(df.loc[df.index >= market_close, vol_col].sum())
+            vol_col = "Volume"
+            pre_vol  = int(df.loc[df.index < market_open,  vol_col].sum())
+            post_vol = int(df.loc[df.index >= market_close, vol_col].sum())
 
-        return symbol, {
-            "pre_market_volume":  pre_vol,
-            "post_market_volume": post_vol,
-        }
+            return symbol, {
+                "pre_market_volume":  pre_vol,
+                "post_market_volume": post_vol,
+            }
+        except Exception as e:
+            logger.debug("Fallo manipulación pandas en YF extendido %s: %s", symbol, e)
+            return symbol, _scrape_marketwatch_volumen(symbol)
+
     except Exception as exc:
-        logger.warning("Error volumen extendido [%s]: %s", symbol, exc)
+        logger.warning("Caída de proxy en Extendido [%s]: %s", symbol, exc)
         return symbol, {}
 
 

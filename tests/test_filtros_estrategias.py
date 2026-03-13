@@ -150,10 +150,10 @@ class TestVolumeSpike:
 
 
 class TestVolumenPostPre:
-    def test_sin_datos_en_cache_es_permisivo(self):
+    def test_sin_datos_en_cache_es_restrictivo(self):
         bs = _barras(5)
-        # Sin datos en fundamentales → permisivo (True)
-        assert len(_senales(bs, [_filtro("VOLUMEN_POST_PRE", "MAYOR_QUE", 999_999_999)])) == 1
+        # Sin datos en fundamentales → restrictivo (False)
+        assert len(_senales(bs, [_filtro("VOLUMEN_POST_PRE", "MAYOR_QUE", 999_999_999)])) == 0
 
     def test_pre_market_volume_cumple(self):
         bs = _barras(5)
@@ -831,12 +831,12 @@ class TestPivots:
 class TestFundamentales:
     @pytest.mark.parametrize("filtro_name", [
         "FLOAT", "SHARES_OUTSTANDING", "MARKET_CAP",
-        "SHORT_INTEREST", "SHORT_RATIO", "DAYS_UNTIL_EARNINGS", "NOTICIAS",
+        "SHORT_INTEREST", "SHORT_RATIO", "DAYS_UNTIL_EARNINGS",
     ])
-    def test_sin_datos_en_cache_es_permisivo(self, filtro_name):
-        """Sin datos en fundamentales → permisivo (True), nunca bloquea."""
+    def test_sin_datos_en_cache_es_restrictivo(self, filtro_name):
+        """Sin datos en fundamentales → restrictivo (False), se descarta."""
         bs = _barras(5)
-        assert len(_senales(bs, [_filtro(filtro_name, "MAYOR_QUE", 999_999_999)])) == 1
+        assert len(_senales(bs, [_filtro(filtro_name, "MAYOR_QUE", 999_999_999)])) == 0
 
     @pytest.mark.parametrize("filtro_name,clave,valor", [
         ("FLOAT",               "float_shares",        5_000_000),

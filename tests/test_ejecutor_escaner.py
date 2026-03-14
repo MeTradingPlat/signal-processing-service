@@ -337,3 +337,128 @@ class TestDetener:
         assert ejecutor._activo is True
         ejecutor.detener()
         assert ejecutor._activo is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: pipeline de fundamentales
+# ---------------------------------------------------------------------------
+
+class TestFundamentales:
+    def _make_ejecutor_con_cache(self, escaner, gestor_tiempo, cache_mock):
+        """Crea EjecutorEscaner con fundamentals_cache inyectado."""
+        kafka = MagicMock()
+        kafka.publicar_log = AsyncMock()
+        kafka.publicar_cambio_estado = AsyncMock()
+        kafka.publicar_senal = AsyncMock()
+        kafka.publicar_simbolos_filtrados = AsyncMock()
+
+        marketdata = MagicMock()
+        marketdata.obtener_simbolos_por_mercados = AsyncMock(return_value=["AAPL", "MSFT"])
+        marketdata.obtener_barras_batch = AsyncMock(return_value={"AAPL": [], "MSFT": []})
+        marketdata.obtener_ultima_vela_batch = AsyncMock(return_value={})
+
+        pool = MagicMock(spec=ProcessPoolExecutor)
+
+        from app.core.ejecutor_escaner import EjecutorEscaner
+        return EjecutorEscaner(
+            escaner=escaner,
+            kafka_producer=kafka,
+            marketdata_rest=marketdata,
+            process_pool=pool,
+            gestor_tiempo=gestor_tiempo,
+            fundamentals_cache=cache_mock,
+        )
+
+    @pytest.mark.asyncio
+    async def test_refrescar_fundamentales_llama_a_cache_refrescar(self):
+        """_refrescar_fundamentales debe llamar a cache.refrescar(simbolos, mercado)."""
+        escaner = make_escaner(mercados=["NYSE"])
+        gt = make_gestor_tiempo_mock()
+
+        cache = MagicMock()
+        cache.refrescar = AsyncMock()
+        cache.obtener = MagicMock(return_value={})
+
+        ejecutor = self._make_ejecutor_con_cache(escaner, gt, cache)
+        # Poblar contextos manualmente para simular estado post-_iniciar_sesion
+        from app.domain.models.contexto_simbolo import ContextoSimbolo
+        import pandas as pd
+        ejecutor._contextos = {
+            "AAPL": ContextoSimbolo(symbol="AAPL", df_barras=pd.DataFrame()),
+            "MSFT": ContextoSimbolo(symbol="MSFT", df_barras=pd.DataFrame()),
+        }
+
+        await ejecutor._refrescar_fundamentales(["AAPL", "MSFT"])
+
+        cache.refrescar.assert_called_once_with(["AAPL", "MSFT"], "NYSE")
+
+    @pytest.mark.asyncio
+    async def test_fundamentales_se_inyectan_en_contextos(self):
+        """Los datos del cache deben quedar en ctx.fundamentales de cada símbolo."""
+        escaner = make_escaner(mercados=["NYSE"])
+        gt = make_gestor_tiempo_mock()
+
+        datos_aapl = {"market_cap": 3e12, "float_shares": 15e9}
+
+        cache = MagicMock()
+        cache.refrescar = AsyncMock()
+        cache.obtener = MagicMock(side_effect=lambda sym: datos_aapl if sym == "AAPL" else {})
+
+        ejecutor = self._make_ejecutor_con_cache(escaner, gt, cache)
+
+        from app.domain.models.contexto_simbolo import ContextoSimbolo
+        import pandas as pd
+        ejecutor._contextos = {
+            "AAPL": ContextoSimbolo(symbol="AAPL", df_barras=pd.DataFrame()),
+            "MSFT": ContextoSimbolo(symbol="MSFT", df_barras=pd.DataFrame()),
+        }
+
+        await ejecutor._refrescar_fundamentales(["AAPL", "MSFT"])
+
+        assert ejecutor._contextos["AAPL"].fundamentales == datos_aapl
+        assert ejecutor._contextos["MSFT"].fundamentales == {}
+
+    @pytest.mark.asyncio
+    async def test_refrescar_fundamentales_no_usa_variable_escaner_libre(self):
+        """No debe lanzar NameError: el log usa self._escaner, no una variable local."""
+        escaner = make_escaner(mercados=["NYSE"])
+        gt = make_gestor_tiempo_mock()
+
+        cache = MagicMock()
+        cache.refrescar = AsyncMock()
+        cache.obtener = MagicMock(return_value={})
+
+        ejecutor = self._make_ejecutor_con_cache(escaner, gt, cache)
+
+        from app.domain.models.contexto_simbolo import ContextoSimbolo
+        import pandas as pd
+        ejecutor._contextos = {
+            "AAPL": ContextoSimbolo(symbol="AAPL", df_barras=pd.DataFrame()),
+        }
+
+        # No debe lanzar NameError
+        await ejecutor._refrescar_fundamentales(["AAPL"])
+
+        # El log se publicó con el id correcto
+        ejecutor._kafka.publicar_log.assert_called_once()
+        args = ejecutor._kafka.publicar_log.call_args[0]
+        assert args[0] == escaner.id_escaner
+
+    @pytest.mark.asyncio
+    async def test_iniciar_sesion_sin_fundamentals_cache_no_falla(self):
+        """Con fundamentals_cache=None el escaner inicia correctamente sin errores."""
+        escaner = make_escaner(hora_inicio=time(9, 30), hora_fin=time(16, 0))
+        gt = make_gestor_tiempo_mock()
+
+        ejecutor = make_ejecutor(escaner, gt)  # sin fundamentals_cache
+        assert ejecutor._fundamentals_cache is None
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            async def stop(n):
+                ejecutor.detener()
+            mock_sleep.side_effect = stop
+
+            await ejecutor.ejecutar()
+
+        # Llegó al loop sin excepción
+        assert ejecutor._activo is False

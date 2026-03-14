@@ -247,8 +247,6 @@ class EjecutorEscaner:
             categoria="INITIALIZATION"
         )
 
-        await self._refrescar_fundamentales(simbolos)
-
         barras_iniciales = await self._marketdata.obtener_barras_batch(simbolos, tf_str, bars=200)
 
         self._contextos = {}
@@ -261,6 +259,8 @@ class EjecutorEscaner:
                 ultima_vela_timestamp=velas_raw[-1].get("timestamp") if velas_raw else None,
             )
 
+        await self._refrescar_fundamentales(simbolos)
+
         await self._kafka.publicar_log(
             escaner.id_escaner, "INFO",
             f"Escáner {escaner.nombre}: sesión iniciada con {len(simbolos)} símbolos, timeframe {tf_str}",
@@ -272,6 +272,9 @@ class EjecutorEscaner:
         if not self._fundamentals_cache or not simbolos:
             return
         mercado = self._escaner.mercados[0] if self._escaner.mercados else "NYSE"
+
+        await self._fundamentals_cache.refrescar(simbolos, mercado)
+
         # Actualizar contextos en memoria con los nuevos fundamentales
         con_datos = 0
         for sym in simbolos:
@@ -287,7 +290,7 @@ class EjecutorEscaner:
             self._escaner.id_escaner, len(simbolos),
         )
         await self._kafka.publicar_log(
-            escaner.id_escaner, "INFO",
+            self._escaner.id_escaner, "INFO",
             f"Fase 2: Fundamentales cargados. {con_datos} símbolos con información, {len(simbolos) - con_datos} ignorados por falta de datos.",
             categoria="INITIALIZATION"
         )

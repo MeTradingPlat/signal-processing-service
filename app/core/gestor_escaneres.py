@@ -71,6 +71,11 @@ class GestorEscaneres:
         self._escaneres[escaner.id_escaner] = escaner
 
         logger.info(">>> ESCANER INICIADO  id=%d  nombre='%s'  mercados=%s", escaner.id_escaner, escaner.nombre, escaner.mercados)
+        await self._kafka.publicar_log(
+            escaner.id_escaner, "INFO",
+            f"Escáner '{escaner.nombre}' iniciado — mercados: {', '.join(escaner.mercados)}",
+            categoria="LIFECYCLE",
+        )
 
     async def _ejecutar_con_manejo_errores(self, escaner: Escaner, ejecutor: EjecutorEscaner):
         """Wrapper que maneja errores y limpieza del Task."""

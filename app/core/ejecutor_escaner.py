@@ -247,6 +247,11 @@ class EjecutorEscaner:
             categoria="INITIALIZATION"
         )
 
+        await self._kafka.publicar_log(
+            escaner.id_escaner, "INFO",
+            f"Cargando barras históricas para {len(simbolos)} símbolos (timeframe {tf_str})...",
+            categoria="INITIALIZATION",
+        )
         barras_iniciales = await self._marketdata.obtener_barras_batch(simbolos, tf_str, bars=200)
 
         self._contextos = {}
@@ -338,6 +343,11 @@ class EjecutorEscaner:
             )
         except Exception as e:
             logger.error("Error evaluando filtros para escaner %d: %s", escaner.id_escaner, e)
+            await self._kafka.publicar_log(
+                escaner.id_escaner, "ERROR",
+                f"Error evaluando filtros: {str(e)[:200]}",
+                categoria="EVALUATION",
+            )
             return
 
         # --- GESTIÓN DE LOGS DE FILTRADO (SOLO EN CAMBIO) ---

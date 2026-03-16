@@ -88,6 +88,11 @@ class HaltMonitor:
         from app.adapters.halt_adapter import obtener_simbolos_halted
         try:
             nuevos = obtener_simbolos_halted()
+            if nuevos is None:
+                # Error de red — conservar último estado conocido
+                logger.warning("HaltMonitor: fallo al obtener halts, conservando estado anterior (%d símbolo(s))",
+                               self.total_halteados())
+                return
             with self._lock:
                 self._halted = nuevos
             if nuevos:

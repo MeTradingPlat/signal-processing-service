@@ -102,6 +102,24 @@ class TestHaltMonitorInicioYRefresco:
             monitor._refrescar()  # no debe lanzar
             assert monitor.total_halteados() == 0
 
+    def test_error_de_red_conserva_estado_anterior(self):
+        """Si el adapter retorna None (timeout/red), el estado previo se conserva."""
+        with patch("app.adapters.halt_adapter.obtener_simbolos_halted",
+                   return_value={"MULN", "ILUS"}):
+            monitor = HaltMonitor(intervalo_seg=9999)
+            monitor.iniciar()
+            assert monitor.esta_halteado("MULN") is True
+
+        # Simular timeout: adapter retorna None
+        with patch("app.adapters.halt_adapter.obtener_simbolos_halted",
+                   return_value=None):
+            monitor._refrescar()
+            # El estado anterior debe conservarse
+            assert monitor.esta_halteado("MULN") is True
+            assert monitor.esta_halteado("ILUS") is True
+
+        monitor.detener()
+
 
 class TestHaltMonitorThreadSafety:
 

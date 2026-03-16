@@ -23,12 +23,12 @@ _NASDAQ_HALT_URL = (
 _TIMEOUT_SEG = 10.0
 
 
-def obtener_simbolos_halted() -> set[str]:
+def obtener_simbolos_halted() -> set[str] | None:
     """Descarga el archivo de halts de NASDAQ y retorna símbolos activos.
 
     Returns:
-        Set de símbolos actualmente halteados.
-        Set vacío si hay error de red o no hay halts activos.
+        Set de símbolos actualmente halteados (vacío si no hay halts activos).
+        None si hubo un error de red o no se pudo obtener el archivo.
     """
     try:
         import httpx
@@ -79,4 +79,4 @@ def obtener_simbolos_halted() -> set[str]:
 
     except Exception as exc:
         logger.warning("Error obteniendo halts NASDAQ: %s", exc)
-        return set()
+        return None

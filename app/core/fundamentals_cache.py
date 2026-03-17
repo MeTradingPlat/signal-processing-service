@@ -119,10 +119,17 @@ class FundamentalsCache:
             self._ultima_fecha_refresh = date.today()
 
         con_datos = sum(1 for v in self._cache.values() if v)
+        sin_datos_cache = [s for s in simbolos if not self._cache.get(s)]
         logger.info(
-            "FundamentalsCache: refresh completado — %d símbolos con datos en caché",
-            con_datos,
+            "FundamentalsCache: refresh completado — %d/%d símbolos con datos en caché",
+            con_datos, len(simbolos),
         )
+        if sin_datos_cache:
+            logger.warning(
+                "FundamentalsCache: %d símbolos quedaron SIN datos en caché: %s",
+                len(sin_datos_cache),
+                ", ".join(sorted(sin_datos_cache)[:50]) + (" ..." if len(sin_datos_cache) > 50 else ""),
+            )
 
     def actualizar_volumen_extendido(self, simbolos: list[str], mercado: str) -> None:
         """Actualización sincrónica de volúmenes pre/post (llamable desde thread)."""

@@ -67,6 +67,37 @@ _PAUSA_BASE_SEG  = 2.0   # pausa inicial; se duplica en cada reintento (2s, 4s, 
 _SIMBOLOS_MALOS: set[str] = set()
 _LOCK_SIMBOLOS_MALOS = __import__("threading").Lock()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Pre-filtro: instrumentos que NUNCA tienen datos fundamentales de acciones
+# ──────────────────────────────────────────────────────────────────────────────
+import re as _re
+
+# Warrants: JOBY/WS, NE/WS/A, IRAB/WS, GME/WS, KRSP/WS ...
+_RE_WARRANT  = _re.compile(r"/WS(/|$)")
+# Units (SPAC): MTAL/U, SAC/U, SOUL/U, AIIA/U ...
+_RE_UNIT     = _re.compile(r"/U(/|$)")
+# Rights: BUIr, CELGr, JACSr, SOULr, XFLHr  (sufijo 'r' minúscula)
+_RE_RIGHTS   = _re.compile(r"[A-Z]r$")
+# Test tickers de bolsa: NTEST/*, ATEST/*, PTEST/*, CTEST, ZVZZT, ZJZZT, ZWZZT
+_RE_TEST     = _re.compile(r"^(ATEST|NTEST|PTEST|CTEST)(/|$)|^(ZVZZT|ZJZZT|ZWZZT)$")
+
+
+def _sin_fundamentales(symbol: str) -> bool:
+    """Retorna True si el símbolo nunca puede tener datos fundamentales.
+
+    Categorías excluidas:
+      Warrants  : JOBY/WS, IRAB/WS, GME/WS, KRSP/WS   → no tienen float/market_cap
+      Units     : MTAL/U, SAC/U, SOUL/U                 → SPAC pre-split, sin datos propios
+      Rights    : BUIr, CELGr, JACSr (lowercase 'r')    → derechos temporales
+      Test      : NTEST/*, ATEST/*, ZVZZT, ZJZZT, ZWZZT → no son valores reales
+    """
+    return bool(
+        _RE_WARRANT.search(symbol)
+        or _RE_UNIT.search(symbol)
+        or _RE_RIGHTS.search(symbol)
+        or _RE_TEST.search(symbol)
+    )
+
 # Multiplicadores para parsear strings de finviz ("15.44B", "3.42T", etc.)
 _MULTIPLICADORES: dict[str, float] = {
     "K": 1_000,
@@ -113,33 +144,30 @@ def _normalizar_simbolo_yahoo(symbol: str) -> str:
     """Convierte el formato de símbolo al esperado por Yahoo Finance.
 
     Yahoo Finance usa '-' como separador de clase, no '/':
-      AKO/A  → AKO-A
-      UHAL/B → UHAL-B
-      FTW/U  → FTW-U
-    Preferred shares: NLYpG → NLY-PG, FHNPE → FHN-PE
-    Units: MTAL-U → MTAL-UN
+      AKO/A   → AKO-A
+      UHAL/B  → UHAL-B
+      MTAL/U  → MTAL-UN  (units: Yahoo siempre usa -UN, independiente de si viene con '/')
+      NLYpG   → NLY-PG   (preferred con 'p' minúscula)
+      TFINp   → TFIN-P   (preferred sin letra de clase)
     """
     import re
 
-    had_slash = "/" in symbol
     s = symbol.replace("/", "-")
 
-    # Units: sufijo -U → -UN (Yahoo convention)
-    # Solo aplica cuando el guión era original (no vino de convertir una barra /U)
-    if not had_slash and s.endswith("-U") and len(s) > 2:
+    # Units: sufijo -U → -UN (Yahoo convention, aplica siempre — venga de /U o -U)
+    if s.endswith("-U") and len(s) > 2:
         s = s + "N"
 
-    # Preferred shares inline: letras minúsculas 'p' seguidas de 1-2 mayúsculas
-    # NLYpG → NLY-PG, TRTNpE → TRTN-PE
+    # Preferred shares con 'p' minúscula seguido de 1-2 mayúsculas: NLYpG → NLY-PG
     m = re.match(r"^([A-Z]+)p([A-Z]{1,2})$", s)
     if m:
         s = f"{m.group(1)}-P{m.group(2)}"
+        return s
 
-    # Preferred shares suffix without separator: FHNPE → FHN-PE, BACPB → BAC-PB
-    # Heurística: si termina en P + 1 letra y no matcheó arriba, intentar
-    # Solo si el símbolo base (sin los últimos 2 chars) tiene >= 2 chars
-    # Esto es ambiguo así que solo lo aplicamos a patrones conocidos
-    # (manejado caso por caso si se necesita)
+    # Preferred shares con 'p' minúscula al final sin letra de clase: TFINp → TFIN-P
+    m2 = re.match(r"^([A-Z]{2,})p$", s)
+    if m2:
+        s = f"{m2.group(1)}-P"
 
     return s
 
@@ -587,8 +615,11 @@ def obtener_fundamentales_batch(
     if mercado in _MERCADOS_SIN_FUNDAMENTALES or not simbolos:
         return {}
 
-    # Deduplicar símbolos para evitar fetch N veces del mismo
-    simbolos_unicos = list(dict.fromkeys(simbolos))
+    # Deduplicar y excluir instrumentos sin fundamentales (warrants, units, rights, test tickers)
+    simbolos_unicos = [s for s in dict.fromkeys(simbolos) if not _sin_fundamentales(s)]
+    excluidos = len(simbolos) - len(simbolos_unicos)
+    if excluidos:
+        logger.debug("Fundamentales [%s]: %d símbolos excluidos (warrants/units/rights/test)", mercado, excluidos)
 
     # ── Paso 1: Finviz concurrente ──────────────────────────────────────────
     finviz_por_sym: dict[str, dict] = {}
@@ -723,8 +754,8 @@ def obtener_volumen_extendido_batch(
     if mercado in _MERCADOS_SIN_FUNDAMENTALES or not simbolos:
         return {}
 
-    # Deduplicar símbolos
-    simbolos_unicos = list(dict.fromkeys(simbolos))
+    # Deduplicar y excluir instrumentos sin volumen extendido relevante
+    simbolos_unicos = [s for s in dict.fromkeys(simbolos) if not _sin_fundamentales(s)]
 
     resultados: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="exthr") as pool:

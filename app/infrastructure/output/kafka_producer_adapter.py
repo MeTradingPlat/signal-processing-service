@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from aiokafka import AIOKafkaProducer
 
@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 SERVICIO_ORIGEN = "signal-processing-service"
 TOPIC_SIGNALS = "signals"
-TOPIC_LOGS = "logs.notifications"
+TOPIC_LOGS = "logs"
 TOPIC_SCANNER_STATE = "scanner.state"
 TOPIC_FILTERED_SYMBOLS = "scanner.filtered_symbols"
 
@@ -52,7 +52,7 @@ class KafkaProducerAdapter:
         categoria: str = "SCANNER",
         tipo: str = "SCANNER_STATE",
     ):
-        """Publica un log al topic 'logs.notifications'."""
+        """Publica un log al topic 'logs' para persistencia y SSE."""
         notificacion = {
             "servicioOrigen": SERVICIO_ORIGEN,
             "nivel": nivel,
@@ -60,7 +60,7 @@ class KafkaProducerAdapter:
             "idEscaner": id_escaner,
             "categoria": categoria,
             "tipo": tipo,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
         }
         try:
             await self._producer.send_and_wait(TOPIC_LOGS, value=notificacion)
@@ -82,7 +82,7 @@ class KafkaProducerAdapter:
             "estadoAnterior": estado_anterior,
             "estadoNuevo": estado_nuevo,
             "razon": razon,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
             "servicioOrigen": SERVICIO_ORIGEN,
         }
         try:
@@ -102,7 +102,7 @@ class KafkaProducerAdapter:
         evento = {
             "idEscaner": id_escaner,
             "simbolos": simbolos,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
             "servicioOrigen": SERVICIO_ORIGEN,
         }
         try:

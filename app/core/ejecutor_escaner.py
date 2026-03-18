@@ -366,7 +366,7 @@ class EjecutorEscaner:
             self._ultimo_conteo_filtrado = conteo_actual
 
         for senal in senales:
-            senal["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+            senal["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
             await self._kafka.publicar_senal(senal)
 
         if senales:

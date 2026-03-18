@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiokafka import AIOKafkaProducer
 
@@ -60,7 +60,7 @@ class KafkaProducerAdapter:
             "idEscaner": id_escaner,
             "categoria": categoria,
             "tipo": tipo,
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         }
         try:
             await self._producer.send_and_wait(TOPIC_LOGS, value=notificacion)
@@ -82,7 +82,7 @@ class KafkaProducerAdapter:
             "estadoAnterior": estado_anterior,
             "estadoNuevo": estado_nuevo,
             "razon": razon,
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
             "servicioOrigen": SERVICIO_ORIGEN,
         }
         try:
@@ -102,7 +102,7 @@ class KafkaProducerAdapter:
         evento = {
             "idEscaner": id_escaner,
             "simbolos": simbolos,
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
             "servicioOrigen": SERVICIO_ORIGEN,
         }
         try:

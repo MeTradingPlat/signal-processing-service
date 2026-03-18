@@ -486,7 +486,9 @@ class TestNormalizarSimboloYahoo:
     def test_convierte_barra_a_guion(self):
         assert _normalizar_simbolo_yahoo("AKO/A")  == "AKO-A"
         assert _normalizar_simbolo_yahoo("UHAL/B") == "UHAL-B"
-        assert _normalizar_simbolo_yahoo("FTW/U")  == "FTW-U"
+        # Units: /U y -U siempre se convierten a -UN (convención Yahoo Finance)
+        assert _normalizar_simbolo_yahoo("FTW/U")  == "FTW-UN"
+        assert _normalizar_simbolo_yahoo("MTAL/U") == "MTAL-UN"
 
     def test_simbolo_normal_no_cambia(self):
         assert _normalizar_simbolo_yahoo("AAPL")  == "AAPL"

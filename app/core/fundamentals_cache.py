@@ -41,6 +41,9 @@ class FundamentalsCache:
         self._cache: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._ultima_fecha_refresh: date | None = None
+        self._refresh_event = asyncio.Event()
+        self._refresh_event.set()   # empieza "libre" (nadie refresheando)
+        self._refresh_en_curso = False
 
     # ── Consulta ──────────────────────────────────────────────────────────────
 
@@ -78,12 +81,23 @@ class FundamentalsCache:
         if mercado in _MERCADOS_SIN_FUNDAMENTALES:
             return
 
+        if not simbolos:
+            return
+
         if not forzar and not self.necesita_refresh():
             logger.debug("FundamentalsCache: datos del día disponibles, skip refresh")
             return
 
-        if not simbolos:
+        # Si otro scanner ya está haciendo el refresh, esperar a que termine
+        # en lugar de lanzar un segundo fetch paralelo (conflictos de crumb yfinance)
+        if self._refresh_en_curso:
+            logger.info("FundamentalsCache: refresh ya en curso, esperando que termine...")
+            await self._refresh_event.wait()
+            logger.info("FundamentalsCache: refresh anterior completado, usando datos del caché")
             return
+
+        self._refresh_en_curso = True
+        self._refresh_event.clear()
 
         from app.adapters.fundamentals_adapter import (
             obtener_fundamentales_batch,
@@ -97,39 +111,43 @@ class FundamentalsCache:
 
         loop = asyncio.get_event_loop()
 
-        # Ambos fetches en paralelo (cada uno ya usa ThreadPoolExecutor internamente)
-        fundamentales, volumenes = await asyncio.gather(
-            loop.run_in_executor(
-                None, obtener_fundamentales_batch, simbolos, mercado,
-            ),
-            loop.run_in_executor(
-                None, obtener_volumen_extendido_batch, simbolos, mercado,
-            ),
-        )
-
-        # Merge y actualizar caché
-        with self._lock:
-            for sym in simbolos:
-                merged = {
-                    **fundamentales.get(sym, {}),
-                    **volumenes.get(sym, {}),
-                }
-                if merged:
-                    self._cache[sym] = merged
-            self._ultima_fecha_refresh = date.today()
-
-        con_datos = sum(1 for v in self._cache.values() if v)
-        sin_datos_cache = [s for s in simbolos if not self._cache.get(s)]
-        logger.info(
-            "FundamentalsCache: refresh completado — %d/%d símbolos con datos en caché",
-            con_datos, len(simbolos),
-        )
-        if sin_datos_cache:
-            logger.warning(
-                "FundamentalsCache: %d símbolos quedaron SIN datos en caché: %s",
-                len(sin_datos_cache),
-                ", ".join(sorted(sin_datos_cache)[:50]) + (" ..." if len(sin_datos_cache) > 50 else ""),
+        try:
+            # Ambos fetches en paralelo (cada uno ya usa ThreadPoolExecutor internamente)
+            fundamentales, volumenes = await asyncio.gather(
+                loop.run_in_executor(
+                    None, obtener_fundamentales_batch, simbolos, mercado,
+                ),
+                loop.run_in_executor(
+                    None, obtener_volumen_extendido_batch, simbolos, mercado,
+                ),
             )
+
+            # Merge y actualizar caché
+            with self._lock:
+                for sym in simbolos:
+                    merged = {
+                        **fundamentales.get(sym, {}),
+                        **volumenes.get(sym, {}),
+                    }
+                    if merged:
+                        self._cache[sym] = merged
+                self._ultima_fecha_refresh = date.today()
+
+            con_datos = sum(1 for v in self._cache.values() if v)
+            sin_datos_cache = [s for s in simbolos if not self._cache.get(s)]
+            logger.info(
+                "FundamentalsCache: refresh completado — %d/%d símbolos con datos en caché",
+                con_datos, len(simbolos),
+            )
+            if sin_datos_cache:
+                logger.warning(
+                    "FundamentalsCache: %d símbolos quedaron SIN datos en caché: %s",
+                    len(sin_datos_cache),
+                    ", ".join(sorted(sin_datos_cache)[:50]) + (" ..." if len(sin_datos_cache) > 50 else ""),
+                )
+        finally:
+            self._refresh_en_curso = False
+            self._refresh_event.set()   # liberar scanners que estaban esperando
 
     def actualizar_volumen_extendido(self, simbolos: list[str], mercado: str) -> None:
         """Actualización sincrónica de volúmenes pre/post (llamable desde thread)."""

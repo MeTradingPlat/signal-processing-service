@@ -22,5 +22,4 @@ class Settings(BaseSettings):
     class Config:
         env_prefix = "SP_"
 
-
 settings = Settings()

@@ -18,7 +18,7 @@ class MarketdataRestAdapter:
         self._base_url = base_url
         self._client = httpx.AsyncClient(
             base_url=base_url,
-            timeout=120.0,  # marketdata abre canales paralelos — puede tardar ~60-90s con 12k simbolos
+            timeout=180.0,  # marketdata procesa 12k símbolos en oleadas de 10 canales → puede tardar ~150s
             headers={"X-Gateway-Passed": "true"},
         )
 

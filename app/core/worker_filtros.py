@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.domain.enums import EnumCondicional
+from app.domain.enums import EnumCondicional, SCANNER_TF_A_MARKETDATA
 from app.domain.models.escaner import ValorCondicional
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -139,10 +139,10 @@ def _evaluar_relative_volume_same_time(df: pd.DataFrame, parametros: list[dict])
 
 def _evaluar_volume_spike(df: pd.DataFrame, parametros: list[dict]) -> bool:
     """VOLUME_SPIKE — vol_actual / promedio_N_velas previas vs umbral (multiplicador).
-    NUMERO_VELAS_VOLUME_SPIKE: cuántas velas comparar (default 10).
+    NUMERO_VELAS_VOLUME_SPIKE: cuántas velas comparar (default 5).
     CONDICION compara el ratio (ej. MAYOR_QUE 3 = más de 3× el promedio)."""
     cond = _leer_condicional(parametros)
-    n    = _leer_int(parametros, "NUMERO_VELAS", default=10)
+    n    = _leer_int(parametros, "NUMERO_VELAS", default=5)
     if cond is None or len(df) < 2:
         return True
     n = max(1, min(n, len(df) - 1))
@@ -386,7 +386,7 @@ def _evaluar_relative_range(df: pd.DataFrame, parametros: list[dict]) -> bool:
     Valores en % (ej. valor1=50 → rango > 50 % del ATR)."""
     import pandas_ta as ta
 
-    periodo = 14
+    periodo = _leer_int(parametros, "LONGITUD", "PERIODO_ATR", "PERIODO", default=14)
     cond    = _leer_condicional(parametros)
     if cond is None or len(df) < periodo + 1:
         return True
@@ -782,7 +782,7 @@ def _evaluar_fundamental_numerico(
         return True
     valor = _leer_fundamental(df, clave)
     if valor is None:
-        return False  # sin datos → restrictivo (se descarta)
+        return True  # sin datos → permisivo (no se descarta)
     return evaluar_condicional(float(valor), cond)
 
 
@@ -891,6 +891,45 @@ _EVALUADORES: dict[str, callable] = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Helpers de timeframe
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _obtener_tf_str_filtro(parametros: list[dict]) -> str | None:
+    """Extrae el timeframe de un filtro como valor de EnumTimeframe (ej. 'M5').
+
+    Mapea desde el nombre del enum Java ('_5M') o clave i18n ('timeframe.5m')
+    al valor de EnumTimeframe usado como clave en barras_por_tf.
+    Retorna None si el filtro no tiene parámetro TIMEFRAME.
+    """
+    for p in parametros:
+        if "TIMEFRAME" in p.get("enum_parametro", "").upper():
+            val = p.get("obj_valor_seleccionado")
+            if val:
+                raw = val.get("valor") or val.get("etiqueta") or ""
+                tf = SCANNER_TF_A_MARKETDATA.get(raw)
+                if tf:
+                    return tf.value  # "M1", "M5", "M15", "M30", "H1"
+    return None
+
+
+def _construir_dfs_por_tf(
+    barras_por_tf: dict[str, dict], symbol: str, fundamentales: dict, halteado: bool
+) -> dict[str, pd.DataFrame]:
+    """Construye y anotea un DataFrame por cada TF disponible."""
+    dfs: dict[str, pd.DataFrame] = {}
+    for tf_str, barras_dict in barras_por_tf.items():
+        df = pd.DataFrame(barras_dict)
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        df.attrs["symbol"]        = symbol
+        df.attrs["fundamentales"] = fundamentales
+        df.attrs["halteado"]      = halteado
+        dfs[tf_str] = df
+    return dfs
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Función principal
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -905,40 +944,54 @@ def evaluar_simbolos(
     Ejecutado en ProcessPoolExecutor — recibe y retorna dicts puros.
 
     Args:
-        contextos: {symbol: {barras: {col: [vals]}, symbol: str, ...}}
+        contextos: {symbol: {barras_por_tf: {tf: {col: [vals]}}, fundamentales, halteado}}
         filtros:   [{enum_filtro, parametros: [{enum_parametro, obj_valor_seleccionado}]}]
         id_escaner: ID del escáner
         nombre_escaner: Nombre del escáner
 
     Returns:
         Lista de señales (dicts) para símbolos que cumplieron todos los filtros.
+
+    Nota sobre selección de barras por filtro:
+        - Cada filtro usa el DataFrame del TF configurado en su parámetro TIMEFRAME.
+        - Filtros sin parámetro TIMEFRAME (PRECIO, FLOAT, HALT, etc.) usan el TF mínimo
+          (primer key de barras_por_tf, que el executor inserta en orden ascendente).
+        - Si el TF de un filtro no tiene barras → permisivo (True): no bloquea.
     """
     senales: list[dict] = []
 
     for symbol, ctx_data in contextos.items():
-        df = pd.DataFrame(ctx_data["barras"])
-        if df.empty:
+        barras_por_tf = ctx_data.get("barras_por_tf", {})
+        if not barras_por_tf:
             continue
 
-        for col in ["open", "high", "low", "close", "volume"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+        dfs = _construir_dfs_por_tf(
+            barras_por_tf,
+            symbol,
+            ctx_data.get("fundamentales", {}),
+            ctx_data.get("halteado", False),
+        )
 
-        # Adjuntar metadatos al DataFrame para que los evaluadores los lean
-        df.attrs["symbol"]        = symbol
-        df.attrs["fundamentales"] = ctx_data.get("fundamentales", {})
-        df.attrs["halteado"]      = ctx_data.get("halteado", False)
+        # TF mínimo = primer key (executor ordena ascendente por intervalo)
+        tf_default = next(iter(dfs))
+        df_default = dfs[tf_default]
 
-        todos_cumplen        = True
+        if df_default.empty and all(df.empty for df in dfs.values()):
+            continue
+
+        todos_cumplen: bool = True
         filtros_que_cumplieron: list[str] = []
 
         for filtro in filtros:
             enum_filtro = filtro.get("enum_filtro", "")
             parametros  = filtro.get("parametros", [])
 
+            # Seleccionar DataFrame del TF del filtro; si no tiene TF → usar el mínimo
+            tf_filtro = _obtener_tf_str_filtro(parametros)
+            df = dfs.get(tf_filtro) if (tf_filtro and tf_filtro in dfs) else df_default
+
             evaluador = _EVALUADORES.get(enum_filtro)
             if evaluador is None:
-                # Filtro no registrado → stub permisivo
                 filtros_que_cumplieron.append(enum_filtro)
                 continue
 
@@ -950,14 +1003,15 @@ def evaluar_simbolos(
 
         if todos_cumplen and filtros_que_cumplieron:
             senales.append({
-                "idEscaner":       id_escaner,
-                "nombreEscaner":   nombre_escaner,
-                "symbol":          symbol,
-                "tipoSenal":       "ALERTA_FILTROS",
+                "idEscaner":        id_escaner,
+                "nombreEscaner":    nombre_escaner,
+                "symbol":           symbol,
+                "tipoSenal":        "ALERTA_FILTROS",
                 "filtrosAplicados": ",".join(filtros_que_cumplieron),
-                "precioDeteccion": float(df["close"].iloc[-1]),
-                "volumenDeteccion": float(df["volume"].iloc[-1]),
-                "servicioOrigen":  "signal-processing-service",
+                # Precio y volumen del TF mínimo (datos más recientes/granulares)
+                "precioDeteccion":  float(df_default["close"].iloc[-1]) if not df_default.empty else 0.0,
+                "volumenDeteccion": float(df_default["volume"].iloc[-1]) if not df_default.empty else 0.0,
+                "servicioOrigen":   "signal-processing-service",
             })
 
     return senales

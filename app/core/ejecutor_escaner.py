@@ -7,7 +7,6 @@ from app.config import settings
 from app.core.fundamentals_cache import FundamentalsCache
 from app.core.gestor_barras import GestorBarras
 from app.core.gestor_tiempo import GestorTiempo
-from app.core.halt_monitor import HaltMonitor
 from app.core.worker_filtros import evaluar_simbolos
 from app.domain.enums import (
     SCANNER_TF_A_MARKETDATA,
@@ -34,7 +33,7 @@ class EjecutorEscaner:
         process_pool: ProcessPoolExecutor,
         gestor_tiempo: GestorTiempo,
         fundamentals_cache: FundamentalsCache | None = None,
-        halt_monitor: HaltMonitor | None = None,
+        halt_monitor=None,
     ):
         self._escaner = escaner
         self._kafka = kafka_producer
@@ -46,32 +45,26 @@ class EjecutorEscaner:
         self._contextos: dict[str, ContextoSimbolo] = {}
         self._activo = True
         self._ultima_fecha_fundamentales: date | None = None
-        self._ultimo_conteo_filtrado: int | None = None  # Para evitar logs redundantes
+        self._ultimo_conteo_filtrado: int | None = None
+        self._ultimos_logs: dict[str, str] = {}
+        self._ultimos_simbolos_filtrados: frozenset | None = None
+        # Timeframes determinados en ejecutar() y reutilizados en toda la sesión
+        self._timeframes: list[EnumTimeframe] = []
+        self._tf_min: EnumTimeframe = EnumTimeframe.M5
 
     async def ejecutar(self):
         """Método principal ejecutado como asyncio.Task."""
         escaner = self._escaner
         gt = self._gestor_tiempo
 
-        # 1. Determinar timeframe mínimo de los filtros
-        timeframe = self._determinar_timeframe()
-        if timeframe is None:
-            await self._kafka.publicar_log(
-                escaner.id_escaner, "WARN",
-                f"Escáner {escaner.nombre}: ningún filtro tiene timeframe soportado (M1/M5/M15/M30/H1)",
-            )
-            logger.warning(
-                "Escaner %d: timeframe no soportado, no se ejecutará",
-                escaner.id_escaner,
-            )
-            return
-
-        intervalo_seg = TIMEFRAME_INTERVALO_SEG[timeframe]
-        tf_str = timeframe.value
+        # 1. Determinar todos los timeframes únicos de los filtros
+        self._timeframes, self._tf_min = self._determinar_timeframes()
+        intervalo_seg = TIMEFRAME_INTERVALO_SEG[self._tf_min]
+        tf_nombres = [tf.value for tf in self._timeframes]
 
         logger.info(
-            "Escaner %d '%s': timeframe=%s, mercados=%s",
-            escaner.id_escaner, escaner.nombre, tf_str, escaner.mercados,
+            "Escaner %d '%s': timeframes=%s (min=%s), mercados=%s",
+            escaner.id_escaner, escaner.nombre, tf_nombres, self._tf_min.value, escaner.mercados,
         )
 
         # 2. Esperar primera ventana de trading antes de tocar marketdata
@@ -79,7 +72,7 @@ class EjecutorEscaner:
             return
 
         # 3. Cargar datos para la sesión actual
-        if not await self._iniciar_sesion(tf_str):
+        if not await self._iniciar_sesion():
             return
 
         # 4. Loop principal
@@ -118,52 +111,51 @@ class EjecutorEscaner:
 
                 # Nueva sesión: recargar símbolos y barras frescas
                 if self._activo:
-                    if not await self._iniciar_sesion(tf_str):
+                    if not await self._iniciar_sesion():
                         break
                 continue
 
-            # 4b-bis. Esperar próximo cierre de vela
-            # Sleep corto: no necesita anti-drift, el margen lo absorbe
+            # 4b. Esperar próximo cierre de vela del TF mínimo
             espera = gt.calcular_espera_vela(intervalo_seg, settings.margen_cierre_vela_seg)
             logger.debug(
-                "Escaner %d: esperando %.1fs para próxima vela",
-                escaner.id_escaner, espera,
+                "Escaner %d: esperando %.1fs para próxima vela (%s)",
+                escaner.id_escaner, espera, self._tf_min.value,
             )
             await asyncio.sleep(espera)
 
             if not self._activo:
                 break
 
-            # 4e. Obtener nuevas velas
+            # 4c. Obtener la última vela para TODOS los timeframes en paralelo
             simbolos_activos = list(self._contextos.keys())
-            nuevas_velas = await self._marketdata.obtener_ultima_vela_batch(
-                simbolos_activos, tf_str,
-            )
+            resultados = await asyncio.gather(*[
+                self._marketdata.obtener_ultima_vela_batch(simbolos_activos, tf.value)
+                for tf in self._timeframes
+            ])
 
-            # Actualizar DataFrames
-            for symbol, vela_data in nuevas_velas.items():
-                if symbol not in self._contextos:
-                    continue
+            # Actualizar barras por TF
+            for tf, nuevas_velas in zip(self._timeframes, resultados):
+                tf_str = tf.value
+                for symbol, vela_data in nuevas_velas.items():
+                    if symbol not in self._contextos:
+                        continue
+                    ctx = self._contextos[symbol]
+                    nuevo_ts = vela_data.get("timestamp", "")
+                    if nuevo_ts and nuevo_ts != ctx.ultima_vela_por_tf.get(tf_str):
+                        vela = Vela.desde_dict(vela_data, symbol)
+                        df_actual = ctx.barras_por_tf.get(
+                            tf_str, GestorBarras.crear_dataframe_desde_velas([])
+                        )
+                        ctx.barras_por_tf[tf_str] = GestorBarras.agregar_vela(df_actual, vela)
+                        ctx.ultima_vela_por_tf[tf_str] = nuevo_ts
 
-                ctx = self._contextos[symbol]
-                nuevo_ts = vela_data.get("timestamp", "")
-
-                if nuevo_ts and nuevo_ts != ctx.ultima_vela_timestamp:
-                    vela = Vela.desde_dict(vela_data, symbol)
-                    ctx.df_barras = GestorBarras.agregar_vela(ctx.df_barras, vela)
-                    ctx.ultima_vela_timestamp = nuevo_ts
-
-            # 4f. Evaluar filtros y publicar señales
+            # 4d. Evaluar filtros y publicar señales
             await self._evaluar_y_publicar()
 
         logger.info("Escaner %d: loop finalizado", escaner.id_escaner)
 
     async def _esperar_ventana_trading(self) -> bool:
-        """Espera hasta que sea el momento correcto para operar.
-
-        Verifica día hábil, hora_fin y hora_inicio antes de cargar datos.
-        Retorna False si fue cancelado, True cuando está listo para operar.
-        """
+        """Espera hasta que sea el momento correcto para operar."""
         escaner = self._escaner
         gt = self._gestor_tiempo
 
@@ -225,8 +217,8 @@ class EjecutorEscaner:
 
         return False
 
-    async def _iniciar_sesion(self, tf_str: str) -> bool:
-        """Carga símbolos, fundamentales y barras históricas para una sesión.
+    async def _iniciar_sesion(self) -> bool:
+        """Carga símbolos, fundamentales y barras históricas para todos los TFs.
 
         Retorna False si no se encontraron símbolos.
         """
@@ -241,34 +233,53 @@ class EjecutorEscaner:
             return False
 
         logger.info("Escaner %d: %d símbolos cargados para la sesión", escaner.id_escaner, len(simbolos))
+        tf_nombres = [tf.value for tf in self._timeframes]
         await self._kafka.publicar_log(
             escaner.id_escaner, "INFO",
-            f"Fase 1: Lista de símbolos obtenida ({len(simbolos)} activos). Iniciando carga de fundamentales...",
+            f"Fase 1: Lista de símbolos obtenida ({len(simbolos)} activos). "
+            f"Iniciando carga de barras para timeframes {tf_nombres}...",
             categoria="INITIALIZATION"
         )
 
+        # Inicializar contextos vacíos
+        self._contextos = {
+            symbol: ContextoSimbolo(symbol=symbol)
+            for symbol in simbolos
+        }
+
+        # Cargar barras históricas para TODOS los timeframes en paralelo
+        resultados = await asyncio.gather(*[
+            self._marketdata.obtener_barras_batch(simbolos, tf.value, bars=200)
+            for tf in self._timeframes
+        ])
+
+        # Poblar barras_por_tf en orden ascendente de intervalo (primer key = TF mínimo)
+        for tf, barras_por_simbolo in zip(self._timeframes, resultados):
+            tf_str = tf.value
+            for symbol in simbolos:
+                velas_raw = barras_por_simbolo.get(symbol, [])
+                df = GestorBarras.crear_dataframe_desde_velas(velas_raw)
+                self._contextos[symbol].barras_por_tf[tf_str] = df
+                self._contextos[symbol].ultima_vela_por_tf[tf_str] = (
+                    velas_raw[-1].get("timestamp") if velas_raw else None
+                )
+
+        simbolos_con_datos = sum(
+            1 for ctx in self._contextos.values() if ctx.tiene_barras()
+        )
         await self._kafka.publicar_log(
             escaner.id_escaner, "INFO",
-            f"Cargando barras históricas para {len(simbolos)} símbolos (timeframe {tf_str})...",
+            f"Fase 1 completada: barras cargadas para {simbolos_con_datos}/{len(simbolos)} símbolos "
+            f"en {len(self._timeframes)} timeframe(s). Cargando fundamentales...",
             categoria="INITIALIZATION",
         )
-        barras_iniciales = await self._marketdata.obtener_barras_batch(simbolos, tf_str, bars=200)
-
-        self._contextos = {}
-        for symbol in simbolos:
-            velas_raw = barras_iniciales.get(symbol, [])
-            df = GestorBarras.crear_dataframe_desde_velas(velas_raw)
-            self._contextos[symbol] = ContextoSimbolo(
-                symbol=symbol,
-                df_barras=df,
-                ultima_vela_timestamp=velas_raw[-1].get("timestamp") if velas_raw else None,
-            )
 
         await self._refrescar_fundamentales(simbolos)
 
         await self._kafka.publicar_log(
             escaner.id_escaner, "INFO",
-            f"Escáner {escaner.nombre}: sesión iniciada con {len(simbolos)} símbolos, timeframe {tf_str}",
+            f"Escáner {escaner.nombre}: sesión iniciada con {len(simbolos)} símbolos, "
+            f"timeframes {tf_nombres}",
         )
         return True
 
@@ -280,7 +291,6 @@ class EjecutorEscaner:
 
         await self._fundamentals_cache.refrescar(simbolos, mercado)
 
-        # Actualizar contextos en memoria con los nuevos fundamentales
         con_datos = 0
         for sym in simbolos:
             if sym in self._contextos:
@@ -296,7 +306,8 @@ class EjecutorEscaner:
         )
         await self._kafka.publicar_log(
             self._escaner.id_escaner, "INFO",
-            f"Fase 2: Fundamentales cargados. {con_datos} símbolos con información, {len(simbolos) - con_datos} ignorados por falta de datos.",
+            f"Fase 2: Fundamentales cargados. {con_datos} símbolos con información, "
+            f"{len(simbolos) - con_datos} ignorados por falta de datos.",
             categoria="INITIALIZATION"
         )
 
@@ -312,7 +323,7 @@ class EjecutorEscaner:
         contextos_ser = {
             symbol: ctx.a_dict_serializable()
             for symbol, ctx in self._contextos.items()
-            if not ctx.df_barras.empty
+            if ctx.tiene_barras()
         }
 
         filtros_ser = []
@@ -350,18 +361,19 @@ class EjecutorEscaner:
             )
             return
 
-        # --- GESTIÓN DE LOGS DE FILTRADO (SOLO EN CAMBIO) ---
         simbolos_que_pasaron = [s["symbol"] for s in senales if s.get("tipoSenal") == "ALERTA_FILTROS"]
         conteo_actual = len(simbolos_que_pasaron)
-        
-        # Enviar lista de símbolos filtrados al topic de frontend
-        await self._kafka.publicar_simbolos_filtrados(escaner.id_escaner, simbolos_que_pasaron)
+
+        simbolos_set = frozenset(simbolos_que_pasaron)
+        if simbolos_set != self._ultimos_simbolos_filtrados:
+            self._ultimos_simbolos_filtrados = simbolos_set
+            await self._kafka.publicar_simbolos_filtrados(escaner.id_escaner, simbolos_que_pasaron)
 
         if conteo_actual != self._ultimo_conteo_filtrado:
-            await self._kafka.publicar_log(
-                escaner.id_escaner, "INFO",
+            await self._publicar_log_dedup(
+                "INFO",
                 f"Fase de Evaluación: {conteo_actual} símbolos cumplen con las estrategias actualmente.",
-                categoria="EVALUATION"
+                categoria="EVALUATION",
             )
             self._ultimo_conteo_filtrado = conteo_actual
 
@@ -370,24 +382,54 @@ class EjecutorEscaner:
             await self._kafka.publicar_senal(senal)
 
         if senales:
-            await self._kafka.publicar_log(
-                escaner.id_escaner, "INFO",
+            await self._publicar_log_dedup(
+                "INFO",
                 f"Escáner {escaner.nombre}: {len(senales)} señales generadas",
+                categoria="SCANNER",
             )
 
-    def _determinar_timeframe(self) -> EnumTimeframe | None:
-        """Determina el timeframe mínimo entre todos los filtros."""
-        timeframes_encontrados: list[EnumTimeframe] = []
+    def _determinar_timeframes(self) -> tuple[list[EnumTimeframe], EnumTimeframe]:
+        """Determina todos los timeframes únicos de los filtros, ordenados ascendente.
+
+        Returns:
+            (lista ordenada por intervalo ascendente, timeframe mínimo)
+        """
+        encontrados: set[EnumTimeframe] = set()
 
         for filtro in self._escaner.filtros:
             tf_str = filtro.obtener_timeframe()
             if tf_str and tf_str in SCANNER_TF_A_MARKETDATA:
-                timeframes_encontrados.append(SCANNER_TF_A_MARKETDATA[tf_str])
+                encontrados.add(SCANNER_TF_A_MARKETDATA[tf_str])
+            elif tf_str:
+                logger.warning(
+                    "Escaner %d '%s': filtro '%s' tiene timeframe '%s' no soportado. Ignorado.",
+                    self._escaner.id_escaner, self._escaner.nombre,
+                    filtro.enum_filtro, tf_str,
+                )
 
-        if not timeframes_encontrados:
-            return EnumTimeframe.M5
+        if not encontrados:
+            logger.warning(
+                "Escaner %d '%s': ningún filtro tiene timeframe — usando M5 por defecto.",
+                self._escaner.id_escaner, self._escaner.nombre,
+            )
+            tf_default = EnumTimeframe.M5
+            return [tf_default], tf_default
 
-        return min(timeframes_encontrados, key=lambda tf: TIMEFRAME_INTERVALO_SEG[tf])
+        tf_lista = sorted(encontrados, key=lambda tf: TIMEFRAME_INTERVALO_SEG[tf])
+        return tf_lista, tf_lista[0]
+
+    async def _publicar_log_dedup(
+        self,
+        nivel: str,
+        mensaje: str,
+        categoria: str = "SCANNER",
+        tipo: str = "SCANNER_STATE",
+    ) -> None:
+        """Publica el log solo si el mensaje cambió respecto al último envío en esa categoría."""
+        if self._ultimos_logs.get(categoria) == mensaje:
+            return
+        self._ultimos_logs[categoria] = mensaje
+        await self._kafka.publicar_log(self._escaner.id_escaner, nivel, mensaje, categoria, tipo)
 
     def detener(self):
         self._activo = False

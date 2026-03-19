@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "kafka:29092"
     kafka_group_id: str = "signal-processing-group"
     max_barras_por_simbolo: int = 500
-    max_simbolos_por_lote: int = 100
+    max_simbolos_por_lote: int = 50
     margen_cierre_vela_seg: int = 5
     max_workers_pool: int = 2
     reintentos_rest: int = 3

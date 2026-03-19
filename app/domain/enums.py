@@ -38,13 +38,23 @@ class EnumTimeframe(str, Enum):
     H1 = "H1"
 
 
-# Mapeo de nombre de timeframe en scanner-management → EnumTimeframe de marketdata
+# Mapeo de nombre de timeframe en scanner-management → EnumTimeframe de marketdata.
+# Se aceptan tanto el nombre del enum Java (e.g. "_1M") como la clave i18n
+# (e.g. "timeframe.1m") que puede venir en el campo etiqueta del API.
 SCANNER_TF_A_MARKETDATA: dict[str, EnumTimeframe] = {
+    # Nombres de enum Java (EnumTimeframe.name())
     "_1M": EnumTimeframe.M1,
     "_5M": EnumTimeframe.M5,
     "_15M": EnumTimeframe.M15,
     "_30M": EnumTimeframe.M30,
     "_1H": EnumTimeframe.H1,
+    # Claves i18n (EnumTimeframe.getEtiqueta()) — fallback por si la API
+    # serializa el campo etiqueta en lugar del valor enum.
+    "timeframe.1m": EnumTimeframe.M1,
+    "timeframe.5m": EnumTimeframe.M5,
+    "timeframe.15m": EnumTimeframe.M15,
+    "timeframe.30m": EnumTimeframe.M30,
+    "timeframe.1h": EnumTimeframe.H1,
 }
 
 # Intervalo en segundos por timeframe

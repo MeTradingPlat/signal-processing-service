@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import httpx
@@ -5,6 +6,9 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Esperas en segundos entre reintentos: 5s, 15s, 30s
+_BACKOFF_SEG = [5, 15, 30]
 
 
 class MarketdataRestAdapter:
@@ -14,9 +18,34 @@ class MarketdataRestAdapter:
         self._base_url = base_url
         self._client = httpx.AsyncClient(
             base_url=base_url,
-            timeout=30.0,
+            timeout=120.0,  # marketdata abre canales paralelos — puede tardar ~60-90s con 12k simbolos
             headers={"X-Gateway-Passed": "true"},
         )
+
+    async def _post_con_reintento(self, url: str, json_body: dict, descripcion: str) -> dict:
+        """POST con reintentos en errores 5xx. Retorna el JSON de respuesta o {} si falla."""
+        max_reintentos = settings.reintentos_rest
+        for intento in range(max_reintentos + 1):
+            try:
+                respuesta = await self._client.post(url, json=json_body)
+                respuesta.raise_for_status()
+                return respuesta.json()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code >= 500 and intento < max_reintentos:
+                    espera = _BACKOFF_SEG[min(intento, len(_BACKOFF_SEG) - 1)]
+                    logger.warning(
+                        "%s: HTTP %d, reintentando en %ds (intento %d/%d)",
+                        descripcion, e.response.status_code, espera,
+                        intento + 1, max_reintentos,
+                    )
+                    await asyncio.sleep(espera)
+                else:
+                    logger.error("%s: %s", descripcion, e)
+                    return {}
+            except httpx.HTTPError as e:
+                logger.error("%s: %s", descripcion, e)
+                return {}
+        return {}
 
     async def obtener_simbolos_por_mercados(self, mercados: list[str]) -> list[str]:
         """GET /api/marketdata/symbols?markets=us_equities,crypto,...
@@ -38,65 +67,31 @@ class MarketdataRestAdapter:
         self, simbolos: list[str], timeframe: str, bars: int = 200
     ) -> dict[str, list[dict]]:
         """POST /api/marketdata/historical/batch
-        Envía lotes de max_simbolos_por_lote símbolos.
+        Manda todos los simbolos en un solo request.
+        marketdata-service divide internamente en chunks de 200 (≤60KB por canal DxLink)
+        y abre un canal paralelo por chunk — soporta 12 000+ simbolos.
         Retorna: {symbol: [velas...]}
         """
-        resultado: dict[str, list[dict]] = {}
-        lote_size = settings.max_simbolos_por_lote
-
-        for i in range(0, len(simbolos), lote_size):
-            lote = simbolos[i : i + lote_size]
-            try:
-                respuesta = await self._client.post(
-                    "/api/marketdata/historical/batch",
-                    json={
-                        "symbols": lote,
-                        "timeframe": timeframe,
-                        "bars": bars,
-                    },
-                )
-                respuesta.raise_for_status()
-                datos = respuesta.json()
-                candles_por_simbolo = datos.get("candlesPorSimbolo", {})
-                resultado.update(candles_por_simbolo)
-            except httpx.HTTPError as e:
-                logger.error(
-                    "Error obteniendo barras batch (lote %d-%d): %s",
-                    i, i + lote_size, e,
-                )
-
-        return resultado
+        datos = await self._post_con_reintento(
+            "/api/marketdata/historical/batch",
+            {"symbols": simbolos, "timeframe": timeframe, "bars": bars},
+            f"barras batch ({len(simbolos)} simbolos)",
+        )
+        return datos.get("candlesPorSimbolo", {})
 
     async def obtener_ultima_vela_batch(
         self, simbolos: list[str], timeframe: str
     ) -> dict[str, dict]:
         """POST /api/marketdata/historical/batch/last
+        Manda todos los simbolos en un solo request.
         Retorna: {symbol: vela}
         """
-        resultado: dict[str, dict] = {}
-        lote_size = settings.max_simbolos_por_lote
-
-        for i in range(0, len(simbolos), lote_size):
-            lote = simbolos[i : i + lote_size]
-            try:
-                respuesta = await self._client.post(
-                    "/api/marketdata/historical/batch/last",
-                    json={
-                        "symbols": lote,
-                        "timeframe": timeframe,
-                    },
-                )
-                respuesta.raise_for_status()
-                datos = respuesta.json()
-                candle_por_simbolo = datos.get("candlePorSimbolo", {})
-                resultado.update(candle_por_simbolo)
-            except httpx.HTTPError as e:
-                logger.error(
-                    "Error obteniendo ultima vela batch (lote %d-%d): %s",
-                    i, i + lote_size, e,
-                )
-
-        return resultado
+        datos = await self._post_con_reintento(
+            "/api/marketdata/historical/batch/last",
+            {"symbols": simbolos, "timeframe": timeframe},
+            f"ultima vela batch ({len(simbolos)} simbolos)",
+        )
+        return datos.get("candlePorSimbolo", {})
 
     async def cerrar(self):
         await self._client.aclose()

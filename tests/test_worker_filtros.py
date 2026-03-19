@@ -44,12 +44,16 @@ def _barras(n: int, inicio: float = 100.0, delta: float = 0.0,
     return barras
 
 
-def _contexto(barras: list[dict], symbol: str = "TEST") -> dict:
+def _contexto(barras: list[dict], symbol: str = "TEST", tf: str = "M5") -> dict:
     df = pd.DataFrame(barras)
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return {"symbol": symbol, "barras": df.to_dict(orient="list"),
-            "ultima_vela_timestamp": barras[-1]["timestamp"] if barras else None}
+    return {
+        "symbol": symbol,
+        "barras_por_tf": {tf: df.to_dict(orient="list")},
+        "fundamentales": {},
+        "halteado": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +523,7 @@ class TestMultiplesSimbolos:
         assert len(senales) == 0
 
     def test_contexto_vacio_no_genera_senal(self, mock_pandas_ta):
-        ctx = {"TEST": {"symbol": "TEST", "barras": {}, "ultima_vela_timestamp": None}}
+        ctx = {"TEST": {"symbol": "TEST", "barras_por_tf": {}, "fundamentales": {}, "halteado": False}}
         senales = evaluar_simbolos(ctx, [_filtro_rsi("MAYOR_QUE", 70.0)], 1, "E1")
         assert len(senales) == 0
 

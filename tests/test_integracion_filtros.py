@@ -240,8 +240,9 @@ def _ctx(candles: list[dict], symbol: str) -> dict:
     return {
         symbol: {
             "symbol": symbol,
-            "barras": df.to_dict(orient="list"),
-            "ultima_vela_timestamp": candles[-1]["timestamp"],
+            "barras_por_tf": {"M5": df.to_dict(orient="list")},
+            "fundamentales": {},
+            "halteado": False,
         }
     }
 

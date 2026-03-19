@@ -303,11 +303,12 @@ class TestTimeframeDeteccionDesdeAPI:
             process_pool=MagicMock(),
             gestor_tiempo=MagicMock(),
         )
-        tf = ejecutor._determinar_timeframe()
-        assert tf == EnumTimeframe.M1, (
-            f"Se esperaba M1 pero se obtuvo {tf}. "
+        tfs, tf_min = ejecutor._determinar_timeframes()
+        assert tf_min == EnumTimeframe.M1, (
+            f"Se esperaba M1 pero se obtuvo {tf_min}. "
             "Revisar logs de 'Diagnóstico de parámetros' para ver el valor raw."
         )
+        assert EnumTimeframe.M1 in tfs
 
     def test_filtro_timeframe_i18n_resuelve_m1(self):
         """'timeframe.1m' (clave i18n) también debe resolverse como M1."""

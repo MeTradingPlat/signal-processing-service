@@ -70,66 +70,69 @@ class TestVelaDesdeDict:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class TestContextoSimbolo:
-    def _make_ctx(self, symbol="AAPL", n_barras=3):
-        barras = {
+    def _make_df(self, n_barras=3):
+        return pd.DataFrame({
             "timestamp": [f"2025-01-01T{i:02d}:00:00Z" for i in range(n_barras)],
-            "open": [float(100 + i) for i in range(n_barras)],
-            "high": [float(105 + i) for i in range(n_barras)],
-            "low": [float(99 + i) for i in range(n_barras)],
-            "close": [float(102 + i) for i in range(n_barras)],
+            "open":   [float(100 + i) for i in range(n_barras)],
+            "high":   [float(105 + i) for i in range(n_barras)],
+            "low":    [float(99 + i)  for i in range(n_barras)],
+            "close":  [float(102 + i) for i in range(n_barras)],
             "volume": [float(1000 * (i + 1)) for i in range(n_barras)],
-        }
-        df = pd.DataFrame(barras)
-        return ContextoSimbolo(symbol=symbol, df_barras=df, ultima_vela_timestamp="2025-01-01T02:00:00Z")
+        })
 
-    def test_df_inicial_vacio(self):
+    def _make_ctx(self, symbol="AAPL", n_barras=3, tf="M5"):
+        df = self._make_df(n_barras)
+        return ContextoSimbolo(
+            symbol=symbol,
+            barras_por_tf={tf: df},
+            ultima_vela_por_tf={tf: "2025-01-01T02:00:00Z"},
+        )
+
+    def test_barras_por_tf_inicial_vacio(self):
         ctx = ContextoSimbolo(symbol="TEST")
-        assert ctx.df_barras.empty
-        assert list(ctx.df_barras.columns) == ["timestamp", "open", "high", "low", "close", "volume"]
+        assert ctx.barras_por_tf == {}
+        assert ctx.ultima_vela_por_tf == {}
+
+    def test_tiene_barras_con_datos(self):
+        ctx = self._make_ctx(n_barras=3)
+        assert ctx.tiene_barras() is True
+
+    def test_tiene_barras_sin_datos(self):
+        ctx = ContextoSimbolo(symbol="TEST")
+        assert ctx.tiene_barras() is False
 
     def test_a_dict_serializable_contiene_campos(self):
         ctx = self._make_ctx()
         d = ctx.a_dict_serializable()
         assert d["symbol"] == "AAPL"
-        assert "barras" in d
-        assert d["ultima_vela_timestamp"] == "2025-01-01T02:00:00Z"
+        assert "barras_por_tf" in d
+        assert "M5" in d["barras_por_tf"]
 
     def test_a_dict_serializable_barras_como_dict_de_listas(self):
         ctx = self._make_ctx(n_barras=3)
         d = ctx.a_dict_serializable()
-        barras = d["barras"]
-        assert "close" in barras
-        assert len(barras["close"]) == 3
+        barras_m5 = d["barras_por_tf"]["M5"]
+        assert "close" in barras_m5
+        assert len(barras_m5["close"]) == 3
 
-    def test_roundtrip_desde_dict_serializable(self):
-        ctx = self._make_ctx(n_barras=5)
+    def test_a_dict_serializable_multiples_tf(self):
+        df5 = self._make_df(3)
+        df15 = self._make_df(5)
+        ctx = ContextoSimbolo(symbol="AAPL", barras_por_tf={"M5": df5, "M15": df15})
         d = ctx.a_dict_serializable()
-        ctx2 = ContextoSimbolo.desde_dict_serializable(d)
-        assert ctx2.symbol == ctx.symbol
-        assert ctx2.ultima_vela_timestamp == ctx.ultima_vela_timestamp
-        assert len(ctx2.df_barras) == 5
-        assert list(ctx2.df_barras.columns) == list(ctx.df_barras.columns)
+        assert set(d["barras_por_tf"].keys()) == {"M5", "M15"}
+        assert len(d["barras_por_tf"]["M15"]["close"]) == 5
 
-    def test_roundtrip_valores_numericos(self):
-        ctx = self._make_ctx(n_barras=2)
-        ctx2 = ContextoSimbolo.desde_dict_serializable(ctx.a_dict_serializable())
-        assert pytest.approx(ctx2.df_barras["close"].tolist()) == ctx.df_barras["close"].tolist()
-
-    def test_ultima_vela_timestamp_none(self):
+    def test_a_dict_serializable_sin_barras(self):
         ctx = ContextoSimbolo(symbol="X")
         d = ctx.a_dict_serializable()
-        assert d["ultima_vela_timestamp"] is None
-        ctx2 = ContextoSimbolo.desde_dict_serializable(d)
-        assert ctx2.ultima_vela_timestamp is None
+        assert d["barras_por_tf"] == {}
 
-    def test_desde_dict_serializable_df_vacio(self):
-        d = {
-            "symbol": "Z",
-            "barras": {"timestamp": [], "open": [], "high": [], "low": [], "close": [], "volume": []},
-            "ultima_vela_timestamp": None,
-        }
-        ctx = ContextoSimbolo.desde_dict_serializable(d)
-        assert ctx.df_barras.empty
+    def test_a_dict_serializable_valores_numericos(self):
+        ctx = self._make_ctx(n_barras=2)
+        d = ctx.a_dict_serializable()
+        closes = d["barras_por_tf"]["M5"]["close"]
+        assert pytest.approx(closes) == [102.0, 103.0]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

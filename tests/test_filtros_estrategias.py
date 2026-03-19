@@ -54,9 +54,10 @@ def _df(barras) -> pd.DataFrame:
 
 def _ctx(barras, symbol="SYM", fundamentales: dict | None = None) -> dict:
     df = _df(barras)
-    return {symbol: {"symbol": symbol, "barras": df.to_dict(orient="list"),
-                     "ultima_vela_timestamp": barras[-1]["timestamp"],
-                     "fundamentales": fundamentales or {}}}
+    return {symbol: {"symbol": symbol,
+                     "barras_por_tf": {"M5": df.to_dict(orient="list")},
+                     "fundamentales": fundamentales or {},
+                     "halteado": False}}
 
 
 def _filtro(enum_filtro, condicional=None, v1=None, v2=None, **extra_params):
@@ -833,10 +834,10 @@ class TestFundamentales:
         "FLOAT", "SHARES_OUTSTANDING", "MARKET_CAP",
         "SHORT_INTEREST", "SHORT_RATIO", "DAYS_UNTIL_EARNINGS",
     ])
-    def test_sin_datos_en_cache_es_restrictivo(self, filtro_name):
-        """Sin datos en fundamentales → restrictivo (False), se descarta."""
+    def test_sin_datos_en_cache_es_permisivo(self, filtro_name):
+        """Sin datos en fundamentales → permisivo (True), no bloquea la señal."""
         bs = _barras(5)
-        assert len(_senales(bs, [_filtro(filtro_name, "MAYOR_QUE", 999_999_999)])) == 0
+        assert len(_senales(bs, [_filtro(filtro_name, "MAYOR_QUE", 999_999_999)])) == 1
 
     @pytest.mark.parametrize("filtro_name,clave,valor", [
         ("FLOAT",               "float_shares",        5_000_000),

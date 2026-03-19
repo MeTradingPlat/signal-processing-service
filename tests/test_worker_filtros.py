@@ -572,3 +572,132 @@ class TestTimeframes:
             s = evaluar_simbolos(ctx, [_filtro_rsi("MAYOR_QUE", 70.0)], 1, "E")
             resultados.append(len(s) > 0)
         assert len(set(resultados)) == 1  # Todos iguales (True)
+
+
+# ---------------------------------------------------------------------------
+# Tests: selección de barras por timeframe configurado en cada filtro
+# ---------------------------------------------------------------------------
+
+def _ctx_multitf(symbol: str = "TEST") -> dict:
+    """Contexto con M5 (close≈100) y M15 (close≈200).
+    Los valores distintos permiten verificar qué TF recibió cada evaluador."""
+    barras_m5  = _barras(30, inicio=100.0)
+    barras_m15 = _barras(30, inicio=200.0)
+    df5  = pd.DataFrame(barras_m5)
+    df15 = pd.DataFrame(barras_m15)
+    for col in ["open", "high", "low", "close", "volume"]:
+        df5[col]  = pd.to_numeric(df5[col],  errors="coerce")
+        df15[col] = pd.to_numeric(df15[col], errors="coerce")
+    return {
+        symbol: {
+            "symbol": symbol,
+            "barras_por_tf": {
+                "M5":  df5.to_dict(orient="list"),
+                "M15": df15.to_dict(orient="list"),
+            },
+            "fundamentales": {},
+            "halteado": False,
+        }
+    }
+
+
+def _tf_param(enum_name: str, clave: str = "TIMEFRAME_RSI") -> dict:
+    """Parámetro TIMEFRAME serializado igual que Java (ej. '_15M')."""
+    return {
+        "enum_parametro": clave,
+        "obj_valor_seleccionado": {"enumTipoValor": "STRING", "valor": enum_name},
+    }
+
+
+class TestSeleccionTFPorFiltro:
+    """Verifica que cada filtro recibe las barras del TF configurado, no el default.
+
+    Estrategia: contexto con M5 (close≈100) y M15 (close≈200).
+    Comprobamos qué Series se pasó a pandas_ta para saber qué TF se usó.
+    """
+
+    def test_filtro_rsi_con_tf_m15_recibe_barras_m15(self, mock_pandas_ta):
+        """RSI configurado TIMEFRAME=_15M debe recibir barras M15 (close≈200), no M5 (close≈100)."""
+        mock_pandas_ta.rsi.return_value = pd.Series([80.0])
+        filtro = {
+            "enum_filtro": "RSI",
+            "parametros": [_periodo(14), _cond("MAYOR_QUE", 70.0), _tf_param("_15M")],
+        }
+        evaluar_simbolos(_ctx_multitf(), [filtro], 1, "E1")
+
+        close_recibido = mock_pandas_ta.rsi.call_args[0][0]
+        assert float(close_recibido.iloc[-1]) > 150, (
+            f"RSI debía usar M15 (close≈200) pero recibió close={float(close_recibido.iloc[-1]):.1f} (¿M5?)"
+        )
+
+    def test_filtro_rsi_sin_timeframe_usa_tf_minimo_m5(self, mock_pandas_ta):
+        """RSI sin parámetro TIMEFRAME usa el TF mínimo del contexto (M5, close≈100)."""
+        mock_pandas_ta.rsi.return_value = pd.Series([80.0])
+        filtro = _filtro_rsi("MAYOR_QUE", 70.0)  # sin _tf_param
+
+        evaluar_simbolos(_ctx_multitf(), [filtro], 1, "E1")
+
+        close_recibido = mock_pandas_ta.rsi.call_args[0][0]
+        assert float(close_recibido.iloc[-1]) < 150, (
+            f"RSI sin TF debía usar M5 (close≈100) pero recibió close={float(close_recibido.iloc[-1]):.1f} (¿M15?)"
+        )
+
+    def test_rsi_m5_y_atr_m15_cada_uno_recibe_sus_barras(self, mock_pandas_ta):
+        """RSI@M5 + ATR@M15: RSI recibe barras M5 (close≈100) y ATR recibe M15 (high≈202)."""
+        mock_pandas_ta.rsi.return_value = pd.Series([80.0])
+        mock_pandas_ta.atr.return_value = pd.Series([2.0])
+
+        filtro_rsi = {
+            "enum_filtro": "RSI",
+            "parametros": [_periodo(14), _cond("MAYOR_QUE", 70.0), _tf_param("_5M", "TIMEFRAME_RSI")],
+        }
+        filtro_atr = {
+            "enum_filtro": "ATR",
+            "parametros": [
+                {"enum_parametro": "LONGITUD_ATR",
+                 "obj_valor_seleccionado": {"enumTipoValor": "INTEGER", "valor": 14}},
+                _cond("MAYOR_QUE", 1.0),
+                _tf_param("_15M", "TIMEFRAME_ATR"),
+            ],
+        }
+        senales = evaluar_simbolos(_ctx_multitf(), [filtro_rsi, filtro_atr], 1, "E1")
+        assert len(senales) == 1, "Ambos filtros deberían cumplir y generar una señal"
+
+        close_rsi = mock_pandas_ta.rsi.call_args[0][0]
+        assert float(close_rsi.iloc[-1]) < 150, (
+            f"RSI debía usar M5 (close≈100) pero recibió {float(close_rsi.iloc[-1]):.1f}"
+        )
+        high_atr = mock_pandas_ta.atr.call_args[0][0]
+        assert float(high_atr.iloc[-1]) > 150, (
+            f"ATR debía usar M15 (high≈202) pero recibió {float(high_atr.iloc[-1]):.1f}"
+        )
+
+    def test_tf_configurado_no_disponible_cae_en_default(self, mock_pandas_ta):
+        """Si las barras del TF del filtro no existen, cae al TF mínimo disponible (no lanza excepción)."""
+        mock_pandas_ta.rsi.return_value = pd.Series([80.0])
+        # Solo hay M5, el filtro pide M1 que no está
+        filtro = {
+            "enum_filtro": "RSI",
+            "parametros": [_periodo(14), _cond("MAYOR_QUE", 70.0), _tf_param("_1M")],
+        }
+        barras = _barras(30, inicio=100.0)
+        ctx = {"TEST": _contexto(barras, tf="M5")}  # solo M5, sin M1
+
+        senales = evaluar_simbolos(ctx, [filtro], 1, "E1")
+        assert len(senales) == 1, "Debe evaluar con el TF disponible (M5) y no lanzar excepción"
+
+    def test_multiples_simbolos_cada_uno_usa_su_tf(self, mock_pandas_ta):
+        """Con dos símbolos, cada uno tiene sus propios barras_por_tf y se evalúan independientemente."""
+        mock_pandas_ta.rsi.side_effect = [
+            pd.Series([80.0]),  # AAPL: RSI=80 → cumple M15
+            pd.Series([50.0]),  # MSFT: RSI=50 → no cumple M15
+        ]
+        filtro = {
+            "enum_filtro": "RSI",
+            "parametros": [_periodo(14), _cond("MAYOR_QUE", 70.0), _tf_param("_15M")],
+        }
+        ctx = {**_ctx_multitf("AAPL"), **_ctx_multitf("MSFT")}
+        senales = evaluar_simbolos(ctx, [filtro], 1, "E1")
+
+        assert len(senales) == 1
+        assert senales[0]["symbol"] == "AAPL"

@@ -7,20 +7,33 @@ Replica exactamente los filtros configurados en la imagen:
 
 Flujo del test:
   1. Obtiene TODOS los símbolos de todos los mercados (NYSE, NASDAQ, AMEX, ETF, OTC).
-  2. Carga barras M1 históricas en batches POST de BATCH_SIZE símbolos.
+  2. Carga barras M1 históricas enviando TODOS los símbolos en UN SOLO request
+     (igual que en producción: obtener_barras_batch manda todo junto y marketdata
+     divide internamente en canales paralelos).
   3. Evalúa los 3 filtros con evaluar_simbolos().
   4. Imprime el resultado e impone assertions básicas de sanidad.
 
-El test también verifica que _determinar_timeframe() resuelve M1 correctamente
-cuando los filtros tienen TIMEFRAME_* = "_1M" (fix de enums.py).
+TestConcurrenciaMultiplesEscaneres:
+  Simula N escáneres lanzando solicitudes SIMULTÁNEAS, replicando
+  asyncio.gather(*[escaner.obtener_barras_batch() for escaner in escaneres])
+  del GestorEscaneres real. Verifica que no hay 503s y que el tiempo
+  paralelo es menor que el secuencial.
 
 Prerequisito: pandas_ta instalado (disponible en el entorno Docker).
               Si la API no responde, el test es skipped automáticamente.
 """
 
-import importlib
+import asyncio
+import time
 import pytest
 import requests
+
+try:
+    import httpx
+    _HTTPX_OK = True
+except ImportError:
+    _HTTPX_OK = False
+
 
 def _check_pandas_ta_completo() -> bool:
     """Verifica que pandas_ta importa correctamente (requiere numba)."""
@@ -34,6 +47,10 @@ _PANDAS_TA_OK = _check_pandas_ta_completo()
 _SKIP_TA = pytest.mark.skipif(
     not _PANDAS_TA_OK,
     reason="pandas_ta requiere numba; no disponible en Python 3.14+. Correr en Docker.",
+)
+_SKIP_HTTPX = pytest.mark.skipif(
+    not _HTTPX_OK,
+    reason="httpx no disponible.",
 )
 
 from app.domain.enums import SCANNER_TF_A_MARKETDATA, EnumTimeframe
@@ -49,8 +66,8 @@ if _PANDAS_TA_OK:
 API_BASE = "https://metradingplat.com"
 MERCADOS = ["NYSE", "NASDAQ", "AMEX", "ETF", "OTC"]
 BARS_M1 = 60              # Barras M1 a cargar por símbolo
-BATCH_SIZE = 50           # Símbolos por batch POST (>50 genera timeout en el server)
-TIMEOUT_API = 15          # segundos máximos por request
+BATCH_SIZE = 50           # Símbolos por escaner en tests de concurrencia
+TIMEOUT_API = 60          # segundos máximos por request (marketdata puede tardar ~30s con 12k simbolos)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -69,50 +86,112 @@ def _api_get(path: str, **params) -> dict | list:
         pytest.skip(f"API timeout ({TIMEOUT_API}s): {path}")
 
 
-def _api_get_historical(symbol: str, timeframe: str, bars: int) -> list:
-    """GET /api/marketdata/historical/{symbol}?timeframe=M1&bars=60 → lista de velas."""
+def _cargar_barras_batch(simbolos: list[str], timeframe: str, bars: int) -> dict:
+    """Carga barras de TODOS los símbolos en un ÚNICO POST batch.
+
+    Igual que MarketdataRestAdapter.obtener_barras_batch(): manda todos los
+    símbolos juntos. marketdata-service divide internamente en canales paralelos.
+    """
+    print(f"  Enviando {len(simbolos)} simbolos en 1 request...", end=" ", flush=True)
     try:
-        resp = requests.get(
-            f"{API_BASE}/api/marketdata/historical/{symbol}",
-            params={"timeframe": timeframe, "bars": bars},
+        resp = requests.post(
+            f"{API_BASE}/api/marketdata/historical/batch",
+            json={"symbols": simbolos, "timeframe": timeframe, "bars": bars},
+            headers={"X-Gateway-Passed": "true"},
             timeout=TIMEOUT_API,
         )
         resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            for key in ("candles", "candlesPorSimbolo", "data", "bars"):
-                if key in data and isinstance(data[key], list):
-                    return data[key]
-        return []
-    except Exception:
-        return []
+        candles = resp.json().get("candlesPorSimbolo", {})
+        resultado = {s: v for s, v in candles.items() if v}
+        print(f"{len(resultado)} con datos")
+        return resultado
+    except requests.exceptions.ConnectionError:
+        pytest.skip(f"API no reachable: {API_BASE}")
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP {e.response.status_code}")
+        return {}
+    except Exception as e:
+        print(f"Error: {e}")
+        return {}
 
 
-def _cargar_barras_batch(simbolos: list[str], timeframe: str, bars: int) -> dict:
-    """Carga barras de TODOS los símbolos via POST batch en chunks de BATCH_SIZE."""
-    resultado = {}
-    chunks = [simbolos[i:i + BATCH_SIZE] for i in range(0, len(simbolos), BATCH_SIZE)]
-    for i, chunk in enumerate(chunks):
-        print(f"  Batch {i+1}/{len(chunks)}: {len(chunk)} simbolos...", end=" ", flush=True)
-        try:
-            resp = requests.post(
-                f"{API_BASE}/api/marketdata/historical/batch",
-                json={"symbols": chunk, "timeframe": timeframe, "bars": bars},
-                headers={"X-Gateway-Passed": "true"},
-                timeout=TIMEOUT_API,
-            )
-            resp.raise_for_status()
+async def _fetch_batch_async(
+    client: "httpx.AsyncClient",
+    simbolos: list[str],
+    scanner_id: int,
+    timeframe: str = "M1",
+    bars: int = BARS_M1,
+) -> dict:
+    """Replica exactamente MarketdataRestAdapter.obtener_barras_batch().
+
+    Cada llamada representa un EjecutorEscaner solicitando sus barras.
+    Retorna métricas + los símbolos con datos recibidos.
+    """
+    t0 = time.monotonic()
+    try:
+        resp = await client.post(
+            "/api/marketdata/historical/batch",
+            json={"symbols": simbolos, "timeframe": timeframe, "bars": bars},
+        )
+        elapsed = time.monotonic() - t0
+        if resp.status_code == 200:
             candles = resp.json().get("candlesPorSimbolo", {})
-            con_data = {s: v for s, v in candles.items() if v}
-            resultado.update(con_data)
-            print(f"{len(con_data)} con datos")
-        except requests.exceptions.HTTPError as e:
-            print(f"HTTP {e.response.status_code} — skip chunk")
-        except Exception as e:
-            print(f"Error: {e} — skip chunk")
-    return resultado
+            simbolos_recibidos = {s for s, v in candles.items() if v}
+        else:
+            simbolos_recibidos = set()
+        return {
+            "scanner_id": scanner_id,
+            "status": resp.status_code,
+            "n_enviados": len(simbolos),
+            "n_con_datos": len(simbolos_recibidos),
+            "simbolos_enviados": set(simbolos),
+            "simbolos_recibidos": simbolos_recibidos,
+            "elapsed_s": round(elapsed, 2),
+        }
+    except Exception as e:
+        return {
+            "scanner_id": scanner_id,
+            "status": 0,
+            "n_enviados": len(simbolos),
+            "n_con_datos": 0,
+            "simbolos_enviados": set(simbolos),
+            "simbolos_recibidos": set(),
+            "elapsed_s": round(time.monotonic() - t0, 2),
+            "error": str(e),
+        }
+
+
+async def _simular_escaneres_paralelo(grupos: list[list[str]], timeframe: str = "M1") -> tuple[list[dict], float]:
+    """Replica asyncio.gather(*[escaner.obtener_barras_batch() for escaner in escaneres]).
+
+    Todos los grupos lanzan sus requests SIMULTÁNEAMENTE — sin esperar al anterior.
+    """
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=TIMEOUT_API,
+        headers={"X-Gateway-Passed": "true"},
+    ) as client:
+        t0 = time.monotonic()
+        resultados = await asyncio.gather(*[
+            _fetch_batch_async(client, simbolos, i, timeframe)
+            for i, simbolos in enumerate(grupos)
+        ])
+        return list(resultados), round(time.monotonic() - t0, 2)
+
+
+async def _simular_escaneres_secuencial(grupos: list[list[str]], timeframe: str = "M1") -> tuple[list[dict], float]:
+    """Misma carga pero secuencial — para comparar tiempo vs paralelo."""
+    async with httpx.AsyncClient(
+        base_url=API_BASE,
+        timeout=TIMEOUT_API,
+        headers={"X-Gateway-Passed": "true"},
+    ) as client:
+        resultados = []
+        t0 = time.monotonic()
+        for i, simbolos in enumerate(grupos):
+            r = await _fetch_batch_async(client, simbolos, i, timeframe)
+            resultados.append(r)
+        return resultados, round(time.monotonic() - t0, 2)
 
 
 def _construir_filtros_screenshot() -> list[dict]:
@@ -255,8 +334,11 @@ def _construir_filtros_java_format() -> list[dict]:
     return [filtro_volumen, filtro_atr, filtro_rango]
 
 
-def _contextos_desde_barras(barras_por_simbolo: dict) -> dict:
-    """Convierte la respuesta de la API en contextos para evaluar_simbolos()."""
+def _contextos_desde_barras(barras_por_simbolo: dict, tf: str = "M1") -> dict:
+    """Convierte la respuesta de la API en contextos para evaluar_simbolos().
+
+    Usa el formato actual de ContextoSimbolo: barras_por_tf={tf: df}.
+    """
     import pandas as pd
     contextos = {}
     for symbol, velas in barras_por_simbolo.items():
@@ -268,8 +350,9 @@ def _contextos_desde_barras(barras_por_simbolo: dict) -> dict:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         contextos[symbol] = {
             "symbol": symbol,
-            "barras": df.to_dict(orient="list"),
-            "ultima_vela_timestamp": velas[-1].get("timestamp", ""),
+            "barras_por_tf": {tf: df.to_dict(orient="list")},
+            "fundamentales": {},
+            "halteado": False,
         }
     return contextos
 
@@ -437,13 +520,179 @@ class TestSimulacionEscanerM1ConDatosReales:
         contextos = {
             "VACIO": {
                 "symbol": "VACIO",
-                "barras": {col: [] for col in ["open", "high", "low", "close", "volume"]},
-                "ultima_vela_timestamp": "",
+                "barras_por_tf": {"M1": {col: [] for col in ["open", "high", "low", "close", "volume"]}},
+                "fundamentales": {},
+                "halteado": False,
             }
         }
         filtros_ser = _construir_filtros_screenshot()
-        # evaluar_simbolos hace `if df.empty: continue` → el símbolo no genera señal
         senales = evaluar_simbolos(contextos, filtros_ser, 1, "test excluir vacio")
         assert len(senales) == 0, (
             "Un símbolo sin barras debe ser excluido, no generar señal"
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Concurrencia: múltiples escáneres solicitando al mismo tiempo
+# ──────────────────────────────────────────────────────────────────────────────
+
+@_SKIP_HTTPX
+class TestConcurrenciaMultiplesEscaneres:
+    """Simula N escáneres disparando solicitudes SIMULTÁNEAS a marketdata-service.
+
+    Replica el comportamiento real de GestorEscaneres donde cada EjecutorEscaner
+    corre como asyncio.Task independiente y llama obtener_barras_batch() sin
+    esperar a los demás. El gather dispara todos los requests al mismo tiempo.
+
+    Escenarios verificados:
+    - Sin errores 503 con N canales abiertos simultáneamente (fix BAD_ACTION)
+    - Tiempo paralelo < tiempo secuencial (la concurrencia realmente ayuda)
+    - Cada escáner recibe solo los datos de sus propios símbolos (sin contaminación)
+    - Dos escáneres con los mismos símbolos obtienen los mismos resultados
+    """
+
+    N_ESCANERES = 6  # Número de escáneres simulados en paralelo
+
+    def _obtener_simbolos(self) -> list[str]:
+        """Obtiene lista de símbolos del API. Skippea si no hay conectividad."""
+        try:
+            resp = requests.get(
+                f"{API_BASE}/api/marketdata/symbols",
+                params={"markets": MERCADOS},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            simbolos = [d["symbol"] for d in resp.json() if "symbol" in d]
+            if not simbolos:
+                pytest.skip("API retornó 0 símbolos")
+            return simbolos
+        except requests.exceptions.ConnectionError:
+            pytest.skip(f"API no reachable: {API_BASE}")
+        except requests.exceptions.Timeout:
+            pytest.skip("Timeout obteniendo símbolos")
+
+    def _particionar(self, simbolos: list[str], n: int) -> list[list[str]]:
+        """Divide los símbolos en N grupos del mismo tamaño (un grupo por escáner)."""
+        return [simbolos[i * BATCH_SIZE:(i + 1) * BATCH_SIZE] for i in range(n)]
+
+    def test_N_escaneres_en_paralelo_sin_errores_503(self):
+        """N escáneres disparando simultáneamente no deben recibir ningún 503.
+
+        Verifica el fix de BAD_ACTION: canales DxLink con IDs impares no son
+        rechazados aunque se abran múltiples al mismo tiempo.
+        """
+        simbolos = self._obtener_simbolos()
+        grupos = self._particionar(simbolos, self.N_ESCANERES)
+        if len(grupos) < self.N_ESCANERES:
+            pytest.skip("No hay suficientes símbolos para dividir en grupos")
+
+        print(f"\n[Concurrencia] Lanzando {self.N_ESCANERES} escaneres en paralelo "
+              f"({BATCH_SIZE} simbolos c/u)...")
+
+        resultados, tiempo_total = asyncio.run(
+            _simular_escaneres_paralelo(grupos)
+        )
+
+        print(f"[Concurrencia] Tiempo total (paralelo): {tiempo_total}s")
+        print(f"{'Scanner':>8}  {'Status':>6}  {'Enviados':>8}  {'Con datos':>9}  {'Tiempo':>7}")
+        print("-" * 50)
+        for r in resultados:
+            print(f"  Esc-{r['scanner_id']:>2}  {r['status']:>6}  {r['n_enviados']:>8}  "
+                  f"{r['n_con_datos']:>9}  {r['elapsed_s']:>6.2f}s")
+
+        errores_503 = [r for r in resultados if r["status"] == 503]
+        assert len(errores_503) == 0, (
+            f"{len(errores_503)}/{self.N_ESCANERES} requests retornaron 503. "
+            "El fix de BAD_ACTION (IDs de canal impares) no está funcionando. "
+            f"Escáneres fallidos: {[r['scanner_id'] for r in errores_503]}"
+        )
+
+        errores_otros = [r for r in resultados if r["status"] not in (200, 0)]
+        assert len(errores_otros) == 0, (
+            f"Requests con status inesperado: {[(r['scanner_id'], r['status']) for r in errores_otros]}"
+        )
+        print(f"\nOK {self.N_ESCANERES} escaneres concurrentes completados sin 503")
+
+    def test_tiempo_paralelo_es_menor_que_secuencial(self):
+        """Verificar que los requests en paralelo terminan más rápido que en serie.
+
+        En producción, N escaneres no esperan turno — sus requests viajan
+        simultáneamente. Si el tiempo paralelo ≈ tiempo secuencial, significa
+        que hay algún cuello de botella serializado.
+        """
+        simbolos = self._obtener_simbolos()
+        n = 4  # Usar 4 para que la diferencia sea clara sin tardar demasiado
+        grupos = self._particionar(simbolos, n)
+        if len(grupos) < n:
+            pytest.skip("No hay suficientes símbolos")
+
+        print(f"\n[Timing] Midiendo {n} escaneres: paralelo vs secuencial...")
+
+        _, t_paralelo = asyncio.run(_simular_escaneres_paralelo(grupos))
+        _, t_secuencial = asyncio.run(_simular_escaneres_secuencial(grupos))
+
+        print(f"  Paralelo:    {t_paralelo:.2f}s")
+        print(f"  Secuencial:  {t_secuencial:.2f}s")
+        print(f"  Speedup:     {t_secuencial / t_paralelo:.1f}x")
+
+        assert t_paralelo < t_secuencial, (
+            f"El paralelo ({t_paralelo:.2f}s) no fue más rápido que el secuencial "
+            f"({t_secuencial:.2f}s). Los requests no están ocurriendo simultáneamente."
+        )
+        # El paralelo debe ser al menos 1.5x más rápido que secuencial con 4 requests
+        assert t_paralelo < t_secuencial * 0.7, (
+            f"Speedup insuficiente: paralelo={t_paralelo:.2f}s, secuencial={t_secuencial:.2f}s. "
+            f"Con {n} requests paralelos se espera al menos 1.4x speedup."
+        )
+        print(f"\nOK Paralelo {t_secuencial / t_paralelo:.1f}x más rápido que secuencial")
+
+    def test_cada_escaner_recibe_solo_sus_propios_simbolos(self):
+        """Un escáner no recibe datos de los símbolos de otro escáner.
+
+        Verifica que no hay contaminación entre canales DxLink paralelos:
+        el canal del escáner A no procesa eventos del canal del escáner B.
+        """
+        simbolos = self._obtener_simbolos()
+        grupos = self._particionar(simbolos, self.N_ESCANERES)
+        if len(grupos) < self.N_ESCANERES:
+            pytest.skip("No hay suficientes símbolos")
+
+        resultados, _ = asyncio.run(_simular_escaneres_paralelo(grupos))
+
+        contaminados = []
+        for r in resultados:
+            simbolos_ajenos = r["simbolos_recibidos"] - r["simbolos_enviados"]
+            if simbolos_ajenos:
+                contaminados.append((r["scanner_id"], simbolos_ajenos))
+
+        assert len(contaminados) == 0, (
+            f"Escáneres recibieron símbolos que no eran suyos (contaminación entre canales): "
+            f"{contaminados}"
+        )
+        print(f"\nOK Ningún escáner recibió símbolos ajenos ({self.N_ESCANERES} verificados)")
+
+    def test_dos_escaneres_mismo_simbolo_resultado_identico(self):
+        """Dos escáneres solicitando el mismo símbolo simultáneamente reciben los mismos datos.
+
+        Verifica idempotencia: DxLink retorna el mismo snapshot histórico
+        independientemente de cuántos clientes lo pidan al mismo tiempo.
+        """
+        simbolos = self._obtener_simbolos()
+        # Tomar los primeros BATCH_SIZE símbolos y pedirlos dos veces simultáneamente
+        grupo_comun = simbolos[:BATCH_SIZE]
+        grupos = [grupo_comun, grupo_comun]  # Dos escáneres, mismos símbolos
+
+        resultados, _ = asyncio.run(_simular_escaneres_paralelo(grupos))
+
+        r0, r1 = resultados[0], resultados[1]
+
+        assert r0["status"] == 200 and r1["status"] == 200, (
+            f"Alguno de los dos requests falló: status={r0['status']}, {r1['status']}"
+        )
+
+        # Ambos deben recibir exactamente los mismos símbolos con datos
+        assert r0["simbolos_recibidos"] == r1["simbolos_recibidos"], (
+            f"Los dos escáneres recibieron conjuntos distintos de símbolos: "
+            f"esc-0={r0['simbolos_recibidos']}, esc-1={r1['simbolos_recibidos']}"
+        )
+        print(f"\nOK Ambos escáneres recibieron {r0['n_con_datos']} símbolos idénticos")

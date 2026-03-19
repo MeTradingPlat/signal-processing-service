@@ -384,8 +384,8 @@ class TestFundamentales:
         from app.domain.models.contexto_simbolo import ContextoSimbolo
         import pandas as pd
         ejecutor._contextos = {
-            "AAPL": ContextoSimbolo(symbol="AAPL", df_barras=pd.DataFrame()),
-            "MSFT": ContextoSimbolo(symbol="MSFT", df_barras=pd.DataFrame()),
+            "AAPL": ContextoSimbolo(symbol="AAPL"),
+            "MSFT": ContextoSimbolo(symbol="MSFT"),
         }
 
         await ejecutor._refrescar_fundamentales(["AAPL", "MSFT"])
@@ -409,8 +409,8 @@ class TestFundamentales:
         from app.domain.models.contexto_simbolo import ContextoSimbolo
         import pandas as pd
         ejecutor._contextos = {
-            "AAPL": ContextoSimbolo(symbol="AAPL", df_barras=pd.DataFrame()),
-            "MSFT": ContextoSimbolo(symbol="MSFT", df_barras=pd.DataFrame()),
+            "AAPL": ContextoSimbolo(symbol="AAPL"),
+            "MSFT": ContextoSimbolo(symbol="MSFT"),
         }
 
         await ejecutor._refrescar_fundamentales(["AAPL", "MSFT"])
@@ -433,7 +433,7 @@ class TestFundamentales:
         from app.domain.models.contexto_simbolo import ContextoSimbolo
         import pandas as pd
         ejecutor._contextos = {
-            "AAPL": ContextoSimbolo(symbol="AAPL", df_barras=pd.DataFrame()),
+            "AAPL": ContextoSimbolo(symbol="AAPL"),
         }
 
         # No debe lanzar NameError

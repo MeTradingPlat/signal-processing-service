@@ -6,31 +6,27 @@ import pandas as pd
 @dataclass
 class ContextoSimbolo:
     symbol: str
-    df_barras: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(
-        columns=["timestamp", "open", "high", "low", "close", "volume"]
-    ))
-    ultima_vela_timestamp: str | None = None
+    # Barras históricas por timeframe: {"M1": DataFrame, "M5": DataFrame, ...}
+    # Las claves son los valores de EnumTimeframe (ej. "M1", "M5", "M15", "M30", "H1").
+    # El primer key insertado es siempre el TF mínimo (el executor inserta en orden ascendente).
+    barras_por_tf: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Último timestamp recibido por TF (dedup para no re-agregar la misma vela)
+    ultima_vela_por_tf: dict[str, str | None] = field(default_factory=dict)
     fundamentales: dict = field(default_factory=dict)
     halteado: bool = False
+
+    def tiene_barras(self) -> bool:
+        """True si al menos un TF tiene barras no vacías."""
+        return any(not df.empty for df in self.barras_por_tf.values())
 
     def a_dict_serializable(self) -> dict:
         """Convierte a dict serializable para enviar al ProcessPoolExecutor."""
         return {
             "symbol": self.symbol,
-            "barras": self.df_barras.to_dict(orient="list"),
-            "ultima_vela_timestamp": self.ultima_vela_timestamp,
+            "barras_por_tf": {
+                tf: df.to_dict(orient="list")
+                for tf, df in self.barras_por_tf.items()
+            },
             "fundamentales": self.fundamentales,
             "halteado": self.halteado,
         }
-
-    @staticmethod
-    def desde_dict_serializable(data: dict) -> "ContextoSimbolo":
-        """Reconstruye desde dict serializado (en el worker del pool)."""
-        df = pd.DataFrame(data["barras"])
-        return ContextoSimbolo(
-            symbol=data["symbol"],
-            df_barras=df,
-            ultima_vela_timestamp=data.get("ultima_vela_timestamp"),
-            fundamentales=data.get("fundamentales", {}),
-            halteado=data.get("halteado", False),
-        )

@@ -25,6 +25,7 @@ Prerequisito: pandas_ta instalado (disponible en el entorno Docker).
 
 import asyncio
 import time
+from datetime import datetime, timezone, timedelta
 import pytest
 import requests
 
@@ -68,6 +69,18 @@ MERCADOS = ["NYSE", "NASDAQ", "AMEX", "ETF", "OTC"]
 BARS_M1 = 60              # Barras M1 a cargar por símbolo
 BATCH_SIZE = 50           # Símbolos por escaner en tests de concurrencia
 TIMEOUT_API = 60          # segundos máximos por request (marketdata puede tardar ~30s con 12k simbolos)
+
+# US Eastern Time (UTC-5 / UTC-4 DST)
+_ET = timezone(timedelta(hours=-4))  # EDT (marzo–noviembre)
+
+
+def _mercado_abierto() -> bool:
+    """True si estamos en horario regular US (lun-vie 9:30–16:00 ET)."""
+    now = datetime.now(_ET)
+    if now.weekday() >= 5:  # sáb/dom
+        return False
+    t = now.hour * 60 + now.minute
+    return 9 * 60 + 30 <= t < 16 * 60
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -443,6 +456,11 @@ class TestSimulacionEscanerM1ConDatosReales:
             primer_vela = barras[primer_sym][0]
             print(f"  Ejemplo {primer_sym}: {len(barras[primer_sym])} velas, primera={primer_vela}")
 
+        if len(barras) == 0 and not _mercado_abierto():
+            pytest.skip(
+                "0 simbolos con datos M1 — mercado cerrado, "
+                "DxLink no retorna candles M1 recientes fuera de horario"
+            )
         assert len(barras) > 0, (
             "Ningun simbolo retorno barras M1. "
             "Verificar endpoint POST /api/marketdata/historical/batch"

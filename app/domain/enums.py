@@ -30,12 +30,15 @@ class EnumTipoValor(str, Enum):
 
 
 class EnumTimeframe(str, Enum):
-    """Timeframes soportados (solo los nativos de marketdata-service)."""
+    """Timeframes soportados por marketdata-service."""
     M1 = "M1"
     M5 = "M5"
     M15 = "M15"
     M30 = "M30"
     H1 = "H1"
+    D1 = "D1"
+    W1 = "W1"
+    MO1 = "MO1"
 
 
 # Mapeo de nombre de timeframe en scanner-management → EnumTimeframe de marketdata.
@@ -48,6 +51,9 @@ SCANNER_TF_A_MARKETDATA: dict[str, EnumTimeframe] = {
     "_15M": EnumTimeframe.M15,
     "_30M": EnumTimeframe.M30,
     "_1H": EnumTimeframe.H1,
+    "_1D": EnumTimeframe.D1,
+    "_1W": EnumTimeframe.W1,
+    "_1MO": EnumTimeframe.MO1,
     # Claves i18n (EnumTimeframe.getEtiqueta()) — fallback por si la API
     # serializa el campo etiqueta en lugar del valor enum.
     "timeframe.1m": EnumTimeframe.M1,
@@ -55,6 +61,9 @@ SCANNER_TF_A_MARKETDATA: dict[str, EnumTimeframe] = {
     "timeframe.15m": EnumTimeframe.M15,
     "timeframe.30m": EnumTimeframe.M30,
     "timeframe.1h": EnumTimeframe.H1,
+    "timeframe.1d": EnumTimeframe.D1,
+    "timeframe.1w": EnumTimeframe.W1,
+    "timeframe.1mo": EnumTimeframe.MO1,
 }
 
 # Intervalo en segundos por timeframe
@@ -64,6 +73,9 @@ TIMEFRAME_INTERVALO_SEG: dict[EnumTimeframe, int] = {
     EnumTimeframe.M15: 900,
     EnumTimeframe.M30: 1800,
     EnumTimeframe.H1: 3600,
+    EnumTimeframe.D1: 86400,
+    EnumTimeframe.W1: 604800,
+    EnumTimeframe.MO1: 2592000,
 }
 
 

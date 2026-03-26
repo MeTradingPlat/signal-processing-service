@@ -30,11 +30,10 @@ class EstadoEscanerKafkaListener:
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
             auto_offset_reset="earliest",
             enable_auto_commit=True,
-            # Aumentados para tolerar el refresh de fundamentales (~30 min)
-            # que mantiene el event loop ocupado durante el arranque.
-            session_timeout_ms=30000,     # 30s (defecto: 10s)
+            # Aumentados para tolerar el procesamiento de miles de símbolos
+            session_timeout_ms=60000,     # 60s (defecto: 10s)
             heartbeat_interval_ms=10000,  # 10s (defecto: 3s)
-            max_poll_interval_ms=600000,  # 10 min (defecto: 5 min)
+            max_poll_interval_ms=900000,  # 15 min (defecto: 5 min)
         )
         self._gestor = gestor
         self._escaner_rest = escaner_rest

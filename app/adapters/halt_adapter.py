@@ -33,13 +33,23 @@ def obtener_simbolos_halted() -> set[str] | None:
     try:
         import httpx
         import pandas as pd
+        import time
 
-        resp = httpx.get(_NASDAQ_HALT_URL, timeout=_TIMEOUT_SEG, follow_redirects=True)
-        if resp.status_code != 200:
-            logger.warning("NASDAQ halt file: HTTP %d", resp.status_code)
-            return set()
+        max_reintentos = 3
+        texto = ""
+        for intento in range(max_reintentos):
+            try:
+                resp = httpx.get(_NASDAQ_HALT_URL, timeout=_TIMEOUT_SEG, follow_redirects=True)
+                if resp.status_code == 200:
+                    texto = resp.text
+                    break
+                logger.warning("NASDAQ halt file: HTTP %d (intento %d/%d)", resp.status_code, intento + 1, max_reintentos)
+            except Exception as req_exc:
+                logger.warning("NASDAQ halt file error de red: %s (intento %d/%d)", req_exc, intento + 1, max_reintentos)
+            
+            if intento < max_reintentos - 1:
+                time.sleep(2 ** intento)  # 1s, 2s
 
-        texto = resp.text
         if not texto.strip():
             return set()
 

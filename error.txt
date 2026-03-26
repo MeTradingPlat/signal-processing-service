@@ -1,0 +1,49 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\proyectos\metradingplat\signal-processing-service
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 20 items
+
+tests\test_marketdata_rest_adapter.py ...............F.F.F               [100%]
+
+================================== FAILURES ===================================
+____ TestReintentosEn5xx.test_reintenta_en_503_y_exito_en_segundo_intento _____
+tests\test_marketdata_rest_adapter.py:216: in test_reintenta_en_503_y_exito_en_segundo_intento
+    mock_sleep.assert_awaited_once()
+C:\Users\contr\AppData\Local\Programs\Python\Python311\Lib\unittest\mock.py:2283: in assert_awaited_once
+    raise AssertionError(msg)
+E   AssertionError: Expected sleep to have been awaited once. Awaited 2 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.output.marketdata_rest_adapter:marketdata_rest_adapter.py:36 barras batch chunk (1 simbolos, 0/1): HTTP 503, reintentando en 5s (intento 1/3)
+________________ TestReintentosEn5xx.test_no_reintenta_en_404 _________________
+tests\test_marketdata_rest_adapter.py:250: in test_no_reintenta_en_404
+    mock_sleep.assert_not_awaited()
+C:\Users\contr\AppData\Local\Programs\Python\Python311\Lib\unittest\mock.py:2378: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected sleep to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.output.marketdata_rest_adapter:marketdata_rest_adapter.py:43 barras batch chunk (1 simbolos, 0/1): 404 Not Found
+__________ TestReintentosEn5xx.test_backoff_aumenta_entre_reintentos __________
+tests\test_marketdata_rest_adapter.py:287: in test_backoff_aumenta_entre_reintentos
+    assert sleep_calls == [5, 15, 30]  # Backoff: 5s \u2192 15s \u2192 30s
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   assert [5, 15, 30, 0.1] == [5, 15, 30]
+E     
+E     Left contains one more item: 0.1
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.output.marketdata_rest_adapter:marketdata_rest_adapter.py:36 barras batch chunk (1 simbolos, 0/1): HTTP 503, reintentando en 5s (intento 1/3)
+WARNING  app.infrastructure.output.marketdata_rest_adapter:marketdata_rest_adapter.py:36 barras batch chunk (1 simbolos, 0/1): HTTP 503, reintentando en 15s (intento 2/3)
+WARNING  app.infrastructure.output.marketdata_rest_adapter:marketdata_rest_adapter.py:36 barras batch chunk (1 simbolos, 0/1): HTTP 503, reintentando en 30s (intento 3/3)
+============================== warnings summary ===============================
+app\config.py:4
+  D:\proyectos\metradingplat\signal-processing-service\app\config.py:4: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Settings(BaseSettings):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_marketdata_rest_adapter.py::TestReintentosEn5xx::test_reintenta_en_503_y_exito_en_segundo_intento
+FAILED tests/test_marketdata_rest_adapter.py::TestReintentosEn5xx::test_no_reintenta_en_404
+FAILED tests/test_marketdata_rest_adapter.py::TestReintentosEn5xx::test_backoff_aumenta_entre_reintentos
+=================== 3 failed, 17 passed, 1 warning in 1.37s ===================

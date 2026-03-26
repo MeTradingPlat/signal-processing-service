@@ -1,0 +1,37 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\proyectos\metradingplat\signal-processing-service
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 463 items / 1 skipped
+
+tests\test_ejecutor_escaner.py .............                             [  2%]
+tests\test_escaner_model.py ............................                 [  8%]
+tests\test_escaner_rest_adapter.py ............                          [ 11%]
+tests\test_filtros_estrategias.py ...................................... [ 19%]
+........................................................................ [ 35%]
+..............................                                           [ 41%]
+tests\test_fundamentals_adapter.py ...........                           [ 44%]
+tests\test_fundamentals_cache.py ................                        [ 47%]
+tests\test_gestor_barras.py ................                             [ 50%]
+tests\test_gestor_escaneres.py ..............                            [ 53%]
+tests\test_gestor_tiempo.py ............................................ [ 63%]
+...                                                                      [ 64%]
+tests\test_halt_adapter.py ........                                      [ 65%]
+tests\test_halt_monitor.py ...........                                   [ 68%]
+tests\test_kafka_listener.py .........                                   [ 70%]
+tests\test_kafka_producer_adapter.py ............                        [ 72%]
+tests\test_marketdata_rest_adapter.py ....................               [ 77%]
+tests\test_modelos.py ...................                                [ 81%]
+tests\test_rest_controller.py ........                                   [ 82%]
+tests\test_simulacion_escaner_m1.py ...ssss....                          [ 85%]
+tests\test_worker_filtros.py ........................................... [ 94%]
+.........................                                                [100%]
+
+============================== warnings summary ===============================
+app\config.py:4
+  D:\proyectos\metradingplat\signal-processing-service\app\config.py:4: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Settings(BaseSettings):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 459 passed, 5 skipped, 1 warning in 69.41s (0:01:09) =============

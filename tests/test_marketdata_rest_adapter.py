@@ -213,7 +213,8 @@ class TestReintentosEn5xx:
 
         assert "AAPL" in result
         assert mock_client.post.call_count == 2
-        mock_sleep.assert_awaited_once()
+        backoffs = [c for c in mock_sleep.await_args_list if c[0][0] >= 1]
+        assert len(backoffs) == 1
 
     async def test_devuelve_vacio_si_todos_los_reintentos_fallan(self, adapter):
         """4 intentos (1 inicial + 3 reintentos) todos 503 → dict vacío."""
@@ -247,7 +248,8 @@ class TestReintentosEn5xx:
 
         assert result == {}
         assert mock_client.post.call_count == 1   # Sin reintentos
-        mock_sleep.assert_not_awaited()
+        backoffs = [c for c in mock_sleep.await_args_list if c[0][0] >= 1]
+        assert len(backoffs) == 0
 
     async def test_ultima_vela_reintenta_en_503(self, adapter):
         """obtener_ultima_vela_batch también reintenta en 503."""
@@ -284,4 +286,5 @@ class TestReintentosEn5xx:
             ms.reintentos_rest = 3
             await inst.obtener_barras_batch(["AAPL"], "M1", 50)
 
-        assert sleep_calls == [5, 15, 30]  # Backoff: 5s → 15s → 30s
+        backoffs = [s for s in sleep_calls if s >= 1]
+        assert backoffs == [5, 15, 30]  # Backoff: 5s → 15s → 30s

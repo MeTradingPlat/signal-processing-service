@@ -79,9 +79,9 @@ class TestFundamentalsCacheRefresh:
         vol_data  = {"AAPL": {"pre_market_volume": 500_000, "post_market_volume": 200_000}}
 
         with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch",
-                   return_value=fund_data), \
+                   new_callable=AsyncMock, return_value=fund_data), \
              patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch",
-                   return_value=vol_data):
+                   new_callable=AsyncMock, return_value=vol_data):
             await cache.refrescar(["AAPL"], "NYSE")
 
         datos = cache.obtener("AAPL")
@@ -97,9 +97,9 @@ class TestFundamentalsCacheRefresh:
         vol  = {"SYM": {"pre_market_volume": 100_000}}
 
         with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch",
-                   return_value=fund), \
+                   new_callable=AsyncMock, return_value=fund), \
              patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch",
-                   return_value=vol):
+                   new_callable=AsyncMock, return_value=vol):
             await cache.refrescar(["SYM"], "NASDAQ")
 
         datos = cache.obtener("SYM")
@@ -111,8 +111,8 @@ class TestFundamentalsCacheRefresh:
         cache = FundamentalsCache()
         cache._ultima_fecha_refresh = date.today()
 
-        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch") as mock_f, \
-             patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch") as mock_v:
+        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch", new_callable=AsyncMock) as mock_f, \
+             patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch", new_callable=AsyncMock) as mock_v:
             await cache.refrescar(["AAPL"], "NYSE")
             mock_f.assert_not_called()
             mock_v.assert_not_called()
@@ -123,30 +123,30 @@ class TestFundamentalsCacheRefresh:
         cache._ultima_fecha_refresh = date.today()
 
         with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch",
-                   return_value={}), \
+                   new_callable=AsyncMock, return_value={}), \
              patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch",
-                   return_value={}) as mock_v:
+                   new_callable=AsyncMock, return_value={}) as mock_v:
             await cache.refrescar(["AAPL"], "NYSE", forzar=True)
-            mock_v.assert_called_once()
+            mock_v.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_refresh_skip_para_crypto(self):
         cache = FundamentalsCache()
-        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch") as mock_f:
+        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch", new_callable=AsyncMock) as mock_f:
             await cache.refrescar(["BTC-USD"], "CRYPTO")
             mock_f.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_refresh_skip_para_forex(self):
         cache = FundamentalsCache()
-        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch") as mock_f:
+        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch", new_callable=AsyncMock) as mock_f:
             await cache.refrescar(["EURUSD"], "FOREX")
             mock_f.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_refresh_skip_lista_vacia(self):
         cache = FundamentalsCache()
-        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch") as mock_f:
+        with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch", new_callable=AsyncMock) as mock_f:
             await cache.refrescar([], "NYSE")
             mock_f.assert_not_called()
 
@@ -159,9 +159,9 @@ class TestFundamentalsCacheRefresh:
         cache._ultima_fecha_refresh = None  # forzar refresh
 
         with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch",
-                   return_value={"AAPL": {}}), \
+                   new_callable=AsyncMock, return_value={"AAPL": {}}), \
              patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch",
-                   return_value={}):
+                   new_callable=AsyncMock, return_value={}):
             await cache.refrescar(["AAPL"], "NYSE")
 
         # Dict vacío no sobreescribe
@@ -174,9 +174,9 @@ class TestFundamentalsCacheRefresh:
         fund = {s: {"market_cap": i * 1e9} for i, s in enumerate(simbolos)}
 
         with patch("app.adapters.fundamentals_adapter.obtener_fundamentales_batch",
-                   return_value=fund), \
+                   new_callable=AsyncMock, return_value=fund), \
              patch("app.adapters.fundamentals_adapter.obtener_volumen_extendido_batch",
-                   return_value={}):
+                   new_callable=AsyncMock, return_value={}):
             await cache.refrescar(simbolos, "NYSE")
 
         assert cache.total_simbolos() == 50

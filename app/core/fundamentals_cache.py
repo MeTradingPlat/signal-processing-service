@@ -112,14 +112,10 @@ class FundamentalsCache:
         loop = asyncio.get_event_loop()
 
         try:
-            # Ambos fetches en paralelo (cada uno ya usa ThreadPoolExecutor internamente)
+            # Fetch asíncrono nativo (sin delegar a ThreadPoolExecutor)
             fundamentales, volumenes = await asyncio.gather(
-                loop.run_in_executor(
-                    None, obtener_fundamentales_batch, simbolos, mercado,
-                ),
-                loop.run_in_executor(
-                    None, obtener_volumen_extendido_batch, simbolos, mercado,
-                ),
+                obtener_fundamentales_batch(simbolos, mercado),
+                obtener_volumen_extendido_batch(simbolos, mercado),
             )
 
             # Merge y actualizar caché
@@ -149,12 +145,12 @@ class FundamentalsCache:
             self._refresh_en_curso = False
             self._refresh_event.set()   # liberar scanners que estaban esperando
 
-    def actualizar_volumen_extendido(self, simbolos: list[str], mercado: str) -> None:
-        """Actualización sincrónica de volúmenes pre/post (llamable desde thread)."""
+    async def actualizar_volumen_extendido(self, simbolos: list[str], mercado: str) -> None:
+        """Actualización asíncrona de volúmenes pre/post."""
         if mercado in _MERCADOS_SIN_FUNDAMENTALES or not simbolos:
             return
         from app.adapters.fundamentals_adapter import obtener_volumen_extendido_batch
-        volumenes = obtener_volumen_extendido_batch(simbolos, mercado)
+        volumenes = await obtener_volumen_extendido_batch(simbolos, mercado)
         with self._lock:
             for sym, vol_data in volumenes.items():
                 if sym in self._cache:

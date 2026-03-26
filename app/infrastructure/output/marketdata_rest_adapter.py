@@ -67,31 +67,41 @@ class MarketdataRestAdapter:
         self, simbolos: list[str], timeframe: str, bars: int = 200
     ) -> dict[str, list[dict]]:
         """POST /api/marketdata/historical/batch
-        Manda todos los simbolos en un solo request.
-        marketdata-service divide internamente en chunks de 200 (≤60KB por canal DxLink)
-        y abre un canal paralelo por chunk — soporta 12 000+ simbolos.
+        Manda simbolos agrupados en chunks para evitar timeouts de red (incomplete chunked read).
         Retorna: {symbol: [velas...]}
         """
-        datos = await self._post_con_reintento(
-            "/api/marketdata/historical/batch",
-            {"symbols": simbolos, "timeframe": timeframe, "bars": bars},
-            f"barras batch ({len(simbolos)} simbolos)",
-        )
-        return datos.get("candlesPorSimbolo", {})
+        chunk_size = 300
+        resultados = {}
+        for i in range(0, len(simbolos), chunk_size):
+            chunk = simbolos[i:i + chunk_size]
+            datos = await self._post_con_reintento(
+                "/api/marketdata/historical/batch",
+                {"symbols": chunk, "timeframe": timeframe, "bars": bars},
+                f"barras batch chunk ({len(chunk)} simbolos, {i}/{len(simbolos)})",
+            )
+            resultados.update(datos.get("candlesPorSimbolo", {}))
+            await asyncio.sleep(0.1)  # Cede el control al event loop
+        return resultados
 
     async def obtener_ultima_vela_batch(
         self, simbolos: list[str], timeframe: str
     ) -> dict[str, dict]:
         """POST /api/marketdata/historical/batch/last
-        Manda todos los simbolos en un solo request.
+        Manda simbolos agrupados en chunks para evitar timeouts de red.
         Retorna: {symbol: vela}
         """
-        datos = await self._post_con_reintento(
-            "/api/marketdata/historical/batch/last",
-            {"symbols": simbolos, "timeframe": timeframe},
-            f"ultima vela batch ({len(simbolos)} simbolos)",
-        )
-        return datos.get("candlePorSimbolo", {})
+        chunk_size = 300
+        resultados = {}
+        for i in range(0, len(simbolos), chunk_size):
+            chunk = simbolos[i:i + chunk_size]
+            datos = await self._post_con_reintento(
+                "/api/marketdata/historical/batch/last",
+                {"symbols": chunk, "timeframe": timeframe},
+                f"ultima vela batch chunk ({len(chunk)} simbolos, {i}/{len(simbolos)})",
+            )
+            resultados.update(datos.get("candlePorSimbolo", {}))
+            await asyncio.sleep(0.1)  # Cede el control al event_loop
+        return resultados
 
     async def cerrar(self):
         await self._client.aclose()

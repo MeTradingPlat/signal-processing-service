@@ -1,0 +1,31 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\proyectos\metradingplat\signal-processing-service
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 89 items
+
+tests\test_marketdata_rest_adapter.py ....................               [ 22%]
+tests\test_fundamentals_adapter.py ..................................... [ 64%]
+...............                                                          [ 80%]
+tests\test_halt_adapter.py ....F...                                      [ 89%]
+tests\test_kafka_listener.py .........                                   [100%]
+
+================================== FAILURES ===================================
+_________ TestObtenerSimbolosHalted.test_retorna_none_si_error_de_red _________
+tests\test_halt_adapter.py:63: in test_retorna_none_si_error_de_red
+    assert resultado is None
+E   assert set() is None
+------------------------------ Captured log call ------------------------------
+WARNING  app.adapters.halt_adapter:halt_adapter.py:48 NASDAQ halt file error de red: Timeout (intento 1/3)
+WARNING  app.adapters.halt_adapter:halt_adapter.py:48 NASDAQ halt file error de red: Timeout (intento 2/3)
+WARNING  app.adapters.halt_adapter:halt_adapter.py:48 NASDAQ halt file error de red: Timeout (intento 3/3)
+============================== warnings summary ===============================
+app\config.py:4
+  D:\proyectos\metradingplat\signal-processing-service\app\config.py:4: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Settings(BaseSettings):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_halt_adapter.py::TestObtenerSimbolosHalted::test_retorna_none_si_error_de_red
+================== 1 failed, 88 passed, 1 warning in 14.45s ===================

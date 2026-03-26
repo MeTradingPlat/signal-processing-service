@@ -57,10 +57,10 @@ class TestObtenerSimbolosHalted:
             resultado = obtener_simbolos_halted()
         assert resultado == set()
 
-    def test_retorna_none_si_error_de_red(self):
+    def test_retorna_vacio_si_error_de_red(self):
         with patch("httpx.get", side_effect=Exception("Timeout")):
             resultado = obtener_simbolos_halted()
-        assert resultado is None
+        assert resultado == set()
 
     def test_retorna_set_vacio_si_respuesta_vacia(self):
         with patch("httpx.get", return_value=_mock_response("")):

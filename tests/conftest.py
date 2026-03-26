@@ -5,10 +5,6 @@ controlable, evitando la dependencia de numba (incompatible con Python 3.14).
 
 Los tests de worker_filtros usan este fixture explícitamente para controlar
 el valor exacto que retorna cada indicador técnico.
-
-También inyecta mocks de yfinance y finvizfinance en sys.modules si no están
-instalados localmente, para que los tests que usan @patch("yfinance.Ticker")
-o @patch("finvizfinance.quote.finvizfinance") funcionen sin instalar las librerías.
 """
 
 import importlib.machinery
@@ -35,21 +31,6 @@ if "yfinance" not in sys.modules:
     _mock_yf.Ticker = MagicMock()
     _mock_yf.download = MagicMock(return_value=pd.DataFrame())
     sys.modules["yfinance"] = _mock_yf
-
-if "finvizfinance" not in sys.modules:
-    # El mock de finviz retorna "-" en todos los campos para que _parse_finviz_numero
-    # devuelva None y no sobreescriba los datos de yfinance en los tests existentes.
-    _finviz_fundament_mock = MagicMock()
-    _finviz_fundament_mock.get.return_value = "-"
-    _finviz_quote_instance = MagicMock()
-    _finviz_quote_instance.ticker_fundament.return_value = _finviz_fundament_mock
-    _finviz_quote_class = MagicMock(return_value=_finviz_quote_instance)
-    _finviz_quote_module = MagicMock()
-    _finviz_quote_module.finvizfinance = _finviz_quote_class
-    _mock_finviz = MagicMock()
-    _mock_finviz.quote = _finviz_quote_module
-    sys.modules["finvizfinance"] = _mock_finviz
-    sys.modules["finvizfinance.quote"] = _finviz_quote_module
 
 
 @pytest.fixture

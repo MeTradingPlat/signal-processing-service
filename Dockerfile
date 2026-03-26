@@ -12,6 +12,7 @@ FROM base AS test
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
+COPY pytest.ini .
 COPY app/ ./app/
 COPY tests/ ./tests/
 

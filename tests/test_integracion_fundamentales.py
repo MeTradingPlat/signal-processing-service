@@ -56,10 +56,10 @@ def _obtener_todos_los_simbolos() -> list[str]:
         if not simbolos:
             pytest.skip("API retornó 0 símbolos")
         return simbolos
-    except requests.exceptions.ConnectionError:
-        pytest.skip(f"API no reachable: {API_BASE}")
-    except requests.exceptions.Timeout:
-        pytest.skip(f"Timeout ({TIMEOUT_SYMBOLS}s) obteniendo símbolos")
+    except requests.exceptions.ConnectionError as e:
+        raise Exception(f"API no reachable: {API_BASE}. Error: {e}") from e
+    except requests.exceptions.Timeout as e:
+        raise Exception(f"Timeout ({TIMEOUT_SYMBOLS}s) obteniendo símbolos. Error: {e}") from e
     except Exception as e:
         pytest.skip(f"Error inesperado obteniendo símbolos: {e}")
 
@@ -82,10 +82,10 @@ def _llamar_fundamentales_batch(simbolos: list[str]) -> dict:
             pytest.skip(f"Batch fundamentales retornó HTTP {resp.status_code}: {resp.text[:200]}")
 
         return resp.json()
-    except requests.exceptions.ConnectionError:
-        pytest.skip(f"API no reachable: {MARKETDATA_BASE}/fundamentals/batch")
-    except requests.exceptions.Timeout:
-        pytest.skip(f"Timeout ({TIMEOUT_FUND}s) en batch fundamentales")
+    except requests.exceptions.ConnectionError as e:
+        raise Exception(f"API no reachable: {MARKETDATA_BASE}/fundamentals/batch. Error: {e}") from e
+    except requests.exceptions.Timeout as e:
+        raise Exception(f"Timeout ({TIMEOUT_FUND}s) en batch fundamentales. Error: {e}") from e
     except Exception as e:
         pytest.skip(f"Error inesperado en batch fundamentales: {e}")
 

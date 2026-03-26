@@ -144,6 +144,7 @@ def _imprimir_reporte(titulo: str, simbolos: list[str], datos: dict) -> None:
 # Tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+@pytest.mark.integration
 class TestFundamentalesBatchIntegracion:
     """Tests de integración real contra el endpoint de fundamentales en producción."""
 

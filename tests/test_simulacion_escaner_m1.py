@@ -425,6 +425,7 @@ class TestTimeframeDeteccionDesdeAPI:
             assert SCANNER_TF_A_MARKETDATA[i18n_key] == expected_tf, f"Fallo: {i18n_key}"
 
 
+@pytest.mark.integration
 @_SKIP_TA
 class TestSimulacionEscanerM1ConDatosReales:
     """Simula el escáner 'volatilidad y flexibilidad' con datos reales del API."""
@@ -554,6 +555,7 @@ class TestSimulacionEscanerM1ConDatosReales:
 # Concurrencia: múltiples escáneres solicitando al mismo tiempo
 # ──────────────────────────────────────────────────────────────────────────────
 
+@pytest.mark.integration
 @_SKIP_HTTPX
 class TestConcurrenciaMultiplesEscaneres:
     """Simula N escáneres disparando solicitudes SIMULTÁNEAS a marketdata-service.

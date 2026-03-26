@@ -14,8 +14,12 @@ jobs:
       - name: Build test image
         run: docker build --target test -t signal-processing-service:test .
 
-      - name: Run tests
-        run: docker run --rm signal-processing-service:test
+      - name: Run unit tests
+        run: docker run --rm signal-processing-service:test pytest -m "not integration" --tb=short -q
+
+      - name: Run integration tests (API real)
+        run: docker run --rm signal-processing-service:test pytest -m "integration" -v -s --tb=short
+        continue-on-error: true
 
       - name: Login Dockerhub
         env:

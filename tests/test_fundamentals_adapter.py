@@ -1,5 +1,5 @@
-"""Tests para fundamentals_adapter (Estrategia Bulk y No-Hilos)."""
-from unittest.mock import AsyncMock, patch
+"""Tests para fundamentals_adapter (marketdata-service via httpx)."""
+from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 from app.adapters.fundamentals_adapter import (
@@ -39,21 +39,57 @@ class TestObtenerFundamentalesBatch:
         res = await obtener_fundamentales_batch(["BTC"], "CRYPTO")
         assert res == {}
 
-    async def test_integra_finviz_y_yahoo(self):
-        finviz_dict = {"AAPL": {"market_cap": 2e12}}
-        yahoo_dict = {"OTC": {"market_cap": 1e6}}
-        
-        with patch("app.adapters.fundamentals_adapter._bulk_scrape_finviz_screener", new_callable=AsyncMock, return_value=finviz_dict), \
-             patch("app.adapters.fundamentals_adapter._bulk_yahoo_async_fallback", new_callable=AsyncMock, return_value=yahoo_dict), \
+    async def test_integra_datos_de_marketdata_service(self):
+        """Verifica que el adaptador consume correctamente la respuesta del marketdata-service."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "AAPL": {
+                "marketCap": 2e12,
+                "floatShares": 15_000_000_000,
+                "sharesOutstanding": 15_500_000_000,
+                "shortInterest": 0.7,
+                "shortRatio": 1.5,
+                "daysUntilEarnings": 30,
+                "preMarketVolume": 500_000,
+                "postMarketVolume": 200_000,
+            },
+            "OTC": {
+                "marketCap": 1e6,
+                "floatShares": None,
+                "sharesOutstanding": None,
+                "shortInterest": None,
+                "shortRatio": None,
+                "daysUntilEarnings": None,
+                "preMarketVolume": None,
+                "postMarketVolume": None,
+            },
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client), \
              patch("app.adapters.fundamentals_adapter._escribir_reporte_fundamentales"):
             res = await obtener_fundamentales_batch(["AAPL", "OTC"], "NYSE")
-            assert "AAPL" in res
-            assert "OTC" in res
-            assert res["AAPL"]["market_cap"] == 2e12
-            assert res["OTC"]["market_cap"] == 1e6
+
+        assert "AAPL" in res
+        assert "OTC" in res
+        assert res["AAPL"]["market_cap"] == 2e12
+        assert res["AAPL"]["pre_market_volume"] == 500_000
+        assert res["AAPL"]["post_market_volume"] == 200_000
+        assert res["AAPL"]["days_until_earnings"] == 30
+        assert res["OTC"]["market_cap"] == 1e6
 
 @pytest.mark.asyncio
 class TestObtenerVolumenExtendido:
     async def test_skip_forex(self):
         res = await obtener_volumen_extendido_batch(["EUR"], "FOREX")
+        assert res == {}
+
+    async def test_retorna_vacio_siempre(self):
+        """El volumen extendido ahora viene incluido en obtener_fundamentales_batch."""
+        res = await obtener_volumen_extendido_batch(["AAPL", "MSFT"], "NYSE")
         assert res == {}

@@ -1,13 +1,13 @@
 """Tests de integración para el endpoint de fundamentales con datos REALES.
 
-Hace consultas reales a https://metradingplat.com para:
+Hace consultas reales a https://metradingplat.net para:
   1. Obtener TODOS los símbolos de NYSE, NASDAQ, AMEX, ETF, OTC.
   2. Llamar al batch de fundamentales y verificar que los datos llegan.
   3. Validar la estructura del response (campos, tipos).
   4. Reportar estadísticas de cobertura (% con datos por campo).
 
 Prerequisitos:
-  - https://metradingplat.com debe estar accesible.
+  - https://metradingplat.net debe estar accesible.
   - El marketdata-service debe estar corriendo en producción.
   - Si el API no responde, los tests se saltan automáticamente (pytest.skip).
 
@@ -19,7 +19,7 @@ import pytest
 import requests
 import time
 
-API_BASE         = "https://metradingplat.com"
+API_BASE         = "https://metradingplat.net"
 MARKETDATA_BASE  = f"{API_BASE}/api/marketdata"
 TIMEOUT_SYMBOLS  = 30   # segundos para obtener la lista de símbolos
 TIMEOUT_FUND     = 120  # segundos para el batch de fundamentales (puede tardar con 12k símbolos)

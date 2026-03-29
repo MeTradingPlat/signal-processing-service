@@ -64,7 +64,7 @@ if _PANDAS_TA_OK:
 # Configuración
 # ──────────────────────────────────────────────────────────────────────────────
 
-API_BASE = "https://metradingplat.com"
+API_BASE = "https://metradingplat.net"
 MERCADOS = ["NYSE", "NASDAQ", "AMEX", "ETF", "OTC"]
 BARS_M1 = 60              # Barras M1 a cargar por símbolo
 BATCH_SIZE = 50           # Símbolos por escaner en tests de concurrencia

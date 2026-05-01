@@ -36,7 +36,6 @@ jobs:
       - name: Run Application Container
         run: |
           docker run -d \
-            -p 127.0.0.1:8086:8000 \
             --name "signal-processing-service" \
             --network "metradingplat-network" \
             --restart "unless-stopped" \

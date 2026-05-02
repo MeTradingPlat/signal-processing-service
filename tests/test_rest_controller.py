@@ -22,20 +22,20 @@ class TestHealthEndpoint:
     def test_health_retorna_200(self, app_con_gestor):
         app, _ = app_con_gestor
         client = TestClient(app)
-        response = client.get("/api/signal-processing/health")
+        response = client.get("/signal-processing/health")
         assert response.status_code == 200
 
     def test_health_retorna_status_up(self, app_con_gestor):
         app, _ = app_con_gestor
         client = TestClient(app)
-        response = client.get("/api/signal-processing/health")
+        response = client.get("/signal-processing/health")
         data = response.json()
         assert data["status"] == "UP"
 
     def test_health_retorna_nombre_servicio(self, app_con_gestor):
         app, _ = app_con_gestor
         client = TestClient(app)
-        response = client.get("/api/signal-processing/health")
+        response = client.get("/signal-processing/health")
         data = response.json()
         assert data["servicio"] == "signal-processing-service"
 
@@ -45,7 +45,7 @@ class TestStatusEndpoint:
         app, mock_gestor = app_con_gestor
         mock_gestor.obtener_estado.return_value = {}
         client = TestClient(app)
-        response = client.get("/api/signal-processing/status")
+        response = client.get("/signal-processing/status")
         assert response.status_code == 200
 
     def test_status_retorna_lista_escaneres_activos(self, app_con_gestor):
@@ -55,7 +55,7 @@ class TestStatusEndpoint:
             2: {"nombre": "Scanner B", "estado": "ejecutando"},
         }
         client = TestClient(app)
-        response = client.get("/api/signal-processing/status")
+        response = client.get("/signal-processing/status")
         data = response.json()
         assert "escaneres_activos" in data
         assert data["total"] == 2
@@ -64,7 +64,7 @@ class TestStatusEndpoint:
         app, mock_gestor = app_con_gestor
         mock_gestor.obtener_estado.return_value = {}
         client = TestClient(app)
-        response = client.get("/api/signal-processing/status")
+        response = client.get("/signal-processing/status")
         data = response.json()
         assert data["total"] == 0
 
@@ -72,7 +72,7 @@ class TestStatusEndpoint:
         app, mock_gestor = app_con_gestor
         mock_gestor.obtener_estado.return_value = {}
         client = TestClient(app)
-        client.get("/api/signal-processing/status")
+        client.get("/signal-processing/status")
         assert mock_gestor.obtener_estado.call_count >= 1
 
     def test_status_total_coincide_con_cantidad_escaneres(self, app_con_gestor):
@@ -80,6 +80,6 @@ class TestStatusEndpoint:
         estado = {i: {"nombre": f"Scanner {i}"} for i in range(5)}
         mock_gestor.obtener_estado.return_value = estado
         client = TestClient(app)
-        response = client.get("/api/signal-processing/status")
+        response = client.get("/signal-processing/status")
         data = response.json()
         assert data["total"] == 5

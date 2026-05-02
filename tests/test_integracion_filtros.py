@@ -1,6 +1,6 @@
 """Tests de integración para worker_filtros con datos OHLCV reales.
 
-Datos obtenidos de: https://metradingplat.net/api/marketdata/historical/{symbol}?timeframe={TF}&bars=60
+Datos obtenidos de: https://metradingplat.net/marketdata/historical/{symbol}?timeframe={TF}&bars=60
 - AAPL D1: 60 velas diarias (2025-12-10 a 2026-03-09)
 - MSFT D1: 60 velas diarias (2025-12-10 a 2026-03-09)
 - AAPL M5: 60 velas de 5 minutos (2026-03-09)

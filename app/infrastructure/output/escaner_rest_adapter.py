@@ -17,9 +17,9 @@ class EscanerRestAdapter:
         )
 
     async def obtener_escaneres_iniciados(self) -> list[dict]:
-        """GET /api/escaner/iniciados"""
+        """GET /escaner/iniciados"""
         try:
-            respuesta = await self._client.get("/api/escaner/iniciados")
+            respuesta = await self._client.get("/escaner/iniciados")
             respuesta.raise_for_status()
             return respuesta.json()
         except httpx.HTTPError as e:
@@ -27,9 +27,9 @@ class EscanerRestAdapter:
             return []
 
     async def obtener_escaner_por_id(self, id_escaner: int) -> dict | None:
-        """GET /api/escaner/{id}"""
+        """GET /escaner/{id}"""
         try:
-            respuesta = await self._client.get(f"/api/escaner/{id_escaner}")
+            respuesta = await self._client.get(f"/escaner/{id_escaner}")
             respuesta.raise_for_status()
             return respuesta.json()
         except httpx.HTTPError as e:
@@ -37,9 +37,9 @@ class EscanerRestAdapter:
             return None
 
     async def obtener_filtros_escaner(self, id_escaner: int) -> list[dict]:
-        """GET /api/escaner/filtro/escaner/{id}"""
+        """GET /escaner/filtro/escaner/{id}"""
         try:
-            respuesta = await self._client.get(f"/api/escaner/filtro/escaner/{id_escaner}")
+            respuesta = await self._client.get(f"/escaner/filtro/escaner/{id_escaner}")
             respuesta.raise_for_status()
             return respuesta.json()
         except httpx.HTTPError as e:

@@ -47,7 +47,7 @@ class TestObtenerSimbolosPorMercados:
         mock_client.get = AsyncMock(return_value=_mock_response([]))
         await inst.obtener_simbolos_por_mercados(["NYSE"])
         mock_client.get.assert_awaited_once_with(
-            "/api/marketdata/symbols", params={"markets": ["NYSE"]}
+            "/marketdata/symbols", params={"markets": ["NYSE"]}
         )
 
     async def test_retorna_lista_vacia_en_error_http(self, adapter):

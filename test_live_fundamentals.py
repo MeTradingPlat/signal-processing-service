@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 async def main():
     # 1. Conectar a la API productiva como solicitaste
-    url = "https://metradingplat.net"
+    url = "https://api.metradingplat.net"
     marketdata = MarketdataRestAdapter(url)
     mercados = ["NYSE", "NASDAQ", "AMEX", "ETF", "OTC"]
     

@@ -41,7 +41,7 @@ class TestObtenerEscaneresIniciados:
 
         result = await inst.obtener_escaneres_iniciados()
         assert result == data
-        mock_client.get.assert_awaited_once_with("/api/escaner/iniciados")
+        mock_client.get.assert_awaited_once_with("/escaner/iniciados")
 
     async def test_retorna_lista_vacia_en_error_http(self, adapter):
         inst, mock_client = adapter
@@ -66,7 +66,7 @@ class TestObtenerEscanerPorId:
 
         result = await inst.obtener_escaner_por_id(5)
         assert result == data
-        mock_client.get.assert_awaited_once_with("/api/escaner/5")
+        mock_client.get.assert_awaited_once_with("/escaner/5")
 
     async def test_retorna_none_en_error_http(self, adapter):
         inst, mock_client = adapter
@@ -85,7 +85,7 @@ class TestObtenerEscanerPorId:
         inst, mock_client = adapter
         mock_client.get = AsyncMock(return_value=_mock_response({"id": 42}))
         await inst.obtener_escaner_por_id(42)
-        mock_client.get.assert_awaited_once_with("/api/escaner/42")
+        mock_client.get.assert_awaited_once_with("/escaner/42")
 
 
 @pytest.mark.asyncio
@@ -100,7 +100,7 @@ class TestObtenerFiltrosEscaner:
 
         result = await inst.obtener_filtros_escaner(3)
         assert result == filtros
-        mock_client.get.assert_awaited_once_with("/api/escaner/filtro/escaner/3")
+        mock_client.get.assert_awaited_once_with("/escaner/filtro/escaner/3")
 
     async def test_retorna_lista_vacia_en_error_http(self, adapter):
         inst, mock_client = adapter
@@ -112,7 +112,7 @@ class TestObtenerFiltrosEscaner:
         inst, mock_client = adapter
         mock_client.get = AsyncMock(return_value=_mock_response([]))
         await inst.obtener_filtros_escaner(10)
-        mock_client.get.assert_awaited_once_with("/api/escaner/filtro/escaner/10")
+        mock_client.get.assert_awaited_once_with("/escaner/filtro/escaner/10")
 
     async def test_lista_vacia_si_no_hay_filtros(self, adapter):
         inst, mock_client = adapter

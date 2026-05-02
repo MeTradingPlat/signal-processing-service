@@ -64,7 +64,7 @@ if _PANDAS_TA_OK:
 # Configuración
 # ──────────────────────────────────────────────────────────────────────────────
 
-API_BASE = "https://metradingplat.net"
+API_BASE = "https://api.metradingplat.net"
 MERCADOS = ["NYSE", "NASDAQ", "AMEX", "ETF", "OTC"]
 BARS_M1 = 60              # Barras M1 a cargar por símbolo
 BATCH_SIZE = 50           # Símbolos por escaner en tests de concurrencia
@@ -108,7 +108,7 @@ def _cargar_barras_batch(simbolos: list[str], timeframe: str, bars: int) -> dict
     print(f"  Enviando {len(simbolos)} simbolos en 1 request...", end=" ", flush=True)
     try:
         resp = requests.post(
-            f"{API_BASE}/api/marketdata/historical/batch",
+            f"{API_BASE}/marketdata/historical/batch",
             json={"symbols": simbolos, "timeframe": timeframe, "bars": bars},
             headers={"X-Gateway-Passed": "true"},
             timeout=TIMEOUT_API,
@@ -143,7 +143,7 @@ async def _fetch_batch_async(
     t0 = time.monotonic()
     try:
         resp = await client.post(
-            "/api/marketdata/historical/batch",
+            "/marketdata/historical/batch",
             json={"symbols": simbolos, "timeframe": timeframe, "bars": bars},
         )
         elapsed = time.monotonic() - t0
@@ -432,14 +432,14 @@ class TestSimulacionEscanerM1ConDatosReales:
 
     def test_obtiene_simbolos_de_todos_los_mercados(self):
         """Verifica que el API retorna símbolos de todos los mercados soportados."""
-        datos = _api_get("/api/marketdata/symbols", markets=",".join(MERCADOS))
+        datos = _api_get("/marketdata/symbols", markets=",".join(MERCADOS))
         simbolos = [d["symbol"] for d in datos if "symbol" in d]
         assert len(simbolos) > 0, f"No se obtuvieron símbolos de {MERCADOS}"
         print(f"\n[Todos los mercados] Total símbolos disponibles: {len(simbolos)}")
 
     def test_carga_barras_m1_para_subset(self):
         """Verifica que el batch POST /historical/batch retorna datos M1."""
-        datos = _api_get("/api/marketdata/symbols", markets=",".join(MERCADOS))
+        datos = _api_get("/marketdata/symbols", markets=",".join(MERCADOS))
         todos_simbolos = [d["symbol"] for d in datos if "symbol" in d]
         # Prueba rápida con un solo batch de BATCH_SIZE simbolos
         simbolos = todos_simbolos[:BATCH_SIZE]
@@ -464,7 +464,7 @@ class TestSimulacionEscanerM1ConDatosReales:
             )
         assert len(barras) > 0, (
             "Ningun simbolo retorno barras M1. "
-            "Verificar endpoint POST /api/marketdata/historical/batch"
+            "Verificar endpoint POST /marketdata/historical/batch"
         )
 
     def test_filtros_screenshot_con_datos_reales_m1(self):
@@ -477,7 +477,7 @@ class TestSimulacionEscanerM1ConDatosReales:
           • PERCENTAGE_RANGE > 2 %        (timeframe M1)
         """
         # 1. Obtener TODOS los símbolos de todos los mercados
-        datos = _api_get("/api/marketdata/symbols", markets=",".join(MERCADOS))
+        datos = _api_get("/marketdata/symbols", markets=",".join(MERCADOS))
         todos_simbolos = [d["symbol"] for d in datos if "symbol" in d]
         print(f"\n[Simulacion] {len(todos_simbolos)} simbolos totales ({', '.join(MERCADOS)})")
         print(f"[Simulacion] Cargando barras M1 en batches de {BATCH_SIZE}...")
@@ -577,7 +577,7 @@ class TestConcurrenciaMultiplesEscaneres:
         """Obtiene lista de símbolos del API. Skippea si no hay conectividad."""
         try:
             resp = requests.get(
-                f"{API_BASE}/api/marketdata/symbols",
+                f"{API_BASE}/marketdata/symbols",
                 params={"markets": MERCADOS},
                 timeout=15,
             )

@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def crear_router() -> APIRouter:
-    router = APIRouter(prefix="/api/signal-processing")
+    router = APIRouter(prefix="/signal-processing")
 
     @router.get("/health")
     async def health():

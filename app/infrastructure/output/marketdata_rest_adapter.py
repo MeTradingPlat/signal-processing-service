@@ -48,12 +48,12 @@ class MarketdataRestAdapter:
         return {}
 
     async def obtener_simbolos_por_mercados(self, mercados: list[str]) -> list[str]:
-        """GET /api/marketdata/symbols?markets=us_equities,crypto,...
+        """GET /marketdata/symbols?markets=us_equities,crypto,...
         Retorna lista de símbolos (strings).
         """
         try:
             respuesta = await self._client.get(
-                "/api/marketdata/symbols",
+                "/marketdata/symbols",
                 params={"markets": mercados},
             )
             respuesta.raise_for_status()
@@ -66,7 +66,7 @@ class MarketdataRestAdapter:
     async def obtener_barras_batch(
         self, simbolos: list[str], timeframe: str, bars: int = 200
     ) -> dict[str, list[dict]]:
-        """POST /api/marketdata/historical/batch
+        """POST /marketdata/historical/batch
         Manda simbolos agrupados en chunks para evitar timeouts de red (incomplete chunked read).
         Retorna: {symbol: [velas...]}
         """
@@ -75,7 +75,7 @@ class MarketdataRestAdapter:
         for i in range(0, len(simbolos), chunk_size):
             chunk = simbolos[i:i + chunk_size]
             datos = await self._post_con_reintento(
-                "/api/marketdata/historical/batch",
+                "/marketdata/historical/batch",
                 {"symbols": chunk, "timeframe": timeframe, "bars": bars},
                 f"barras batch chunk ({len(chunk)} simbolos, {i}/{len(simbolos)})",
             )
@@ -86,7 +86,7 @@ class MarketdataRestAdapter:
     async def obtener_ultima_vela_batch(
         self, simbolos: list[str], timeframe: str
     ) -> dict[str, dict]:
-        """POST /api/marketdata/historical/batch/last
+        """POST /marketdata/historical/batch/last
         Manda simbolos agrupados en chunks para evitar timeouts de red.
         Retorna: {symbol: vela}
         """
@@ -95,7 +95,7 @@ class MarketdataRestAdapter:
         for i in range(0, len(simbolos), chunk_size):
             chunk = simbolos[i:i + chunk_size]
             datos = await self._post_con_reintento(
-                "/api/marketdata/historical/batch/last",
+                "/marketdata/historical/batch/last",
                 {"symbols": chunk, "timeframe": timeframe},
                 f"ultima vela batch chunk ({len(chunk)} simbolos, {i}/{len(simbolos)})",
             )

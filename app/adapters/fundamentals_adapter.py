@@ -161,7 +161,7 @@ async def obtener_fundamentales_batch(
 
     simbolos_unicos = [s for s in dict.fromkeys(simbolos) if not _sin_fundamentales(s)]
 
-    url = f"{_MARKETDATA_URL}/api/marketdata/fundamentals/batch"
+    url = f"{_MARKETDATA_URL}/marketdata/fundamentals/batch"
     resultados: dict[str, dict] = {}
 
     logger.info(

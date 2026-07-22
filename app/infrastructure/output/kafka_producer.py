@@ -31,7 +31,7 @@ def _get_producer():
 
 def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     producer = _get_producer()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
     for symbol, passed_filters in signals.items():
         filtros_json = json.dumps([f.enumFiltro.name for f in passed_filters])

@@ -108,6 +108,33 @@ _DYNAMIC_PRE: set[EnumCategoriaFiltro] = {
 
 _ALL_PRE = _STATIC_PRE | _DYNAMIC_PRE
 
+_FILTRO_CATEGORY_FALLBACK: dict[EnumFiltro, EnumCategoriaFiltro] = {
+    EnumFiltro.FLOAT: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
+    EnumFiltro.SHARES_OUTSTANDING: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
+    EnumFiltro.MARKET_CAP: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
+    EnumFiltro.SHORT_INTEREST: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
+    EnumFiltro.SHORT_RATIO: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
+    EnumFiltro.DAYS_UNTIL_EARNINGS: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
+    EnumFiltro.VOLUME: EnumCategoriaFiltro.VOLUMEN,
+    EnumFiltro.AVERAGE_VOLUME: EnumCategoriaFiltro.VOLUMEN,
+    EnumFiltro.VOLUMEN_POST_PRE: EnumCategoriaFiltro.VOLUMEN,
+    EnumFiltro.RELATIVE_VOLUME: EnumCategoriaFiltro.VOLUMEN,
+    EnumFiltro.RELATIVE_VOLUME_SAME_TIME: EnumCategoriaFiltro.VOLUMEN,
+    EnumFiltro.VOLUME_SPIKE: EnumCategoriaFiltro.VOLUMEN,
+    EnumFiltro.CHANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.PERCENTAGE_CHANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.PRECIO: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.GAP_FROM_CLOSE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.POSITION_IN_RANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.PERCENTAGE_RANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.RANGE_DOLLARS: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.CROSSING_ABOVE_BELOW: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.HALT: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.DISTANCE_FROM_VWAP: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.DISTANCE_FROM_EMA: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    EnumFiltro.DISTANCE_FROM_MA: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+}
+
 
 def categorizar_filtros(filtros: List[Filtro]) -> tuple[List[Filtro], List[Filtro], List[Filtro]]:
     estaticos = []
@@ -115,6 +142,8 @@ def categorizar_filtros(filtros: List[Filtro]) -> tuple[List[Filtro], List[Filtr
     tecnicos = []
     for f in filtros:
         cat = f.objCategoria.enumCategoriaFiltro if f.objCategoria else None
+        if cat is None and f.enumFiltro:
+            cat = _FILTRO_CATEGORY_FALLBACK.get(f.enumFiltro)
         if cat in _STATIC_PRE:
             estaticos.append(f)
         elif cat in _DYNAMIC_PRE:

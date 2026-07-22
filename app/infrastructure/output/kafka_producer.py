@@ -34,11 +34,13 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     now = datetime.now(timezone.utc).isoformat()
 
     for symbol, passed_filters in signals.items():
+        filtros_json = json.dumps([f.enumFiltro.name for f in passed_filters])
         event = {
             "idEscaner": scanner_id,
             "nombreEscaner": scanner_name,
             "symbol": symbol,
-            "filtros": [f.enumFiltro.name for f in passed_filters],
+            "tipoSenal": "SCANNER_SIGNAL",
+            "filtrosAplicados": filtros_json,
             "timestamp": now,
             "servicioOrigen": settings.servicio_origen,
         }
@@ -46,7 +48,7 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
             if producer and producer is not False:
                 producer.send("signals", key=symbol, value=event)
             logger.info("SIGNAL: scanner='%s' symbol=%s filters=%s",
-                        scanner_name, symbol, event["filtros"])
+                        scanner_name, symbol, event["filtrosAplicados"])
         except Exception as e:
             logger.error("Failed to publish signal for %s: %s", symbol, e)
 

@@ -193,6 +193,39 @@ class SymbolPipeline:
         if not self.pre_dinamicos:
             return
 
+    def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[Filtro]]:
+        from app.scanner.mappings import timeframe_to_marketdata
+
+        candidates = set(self._filtrados)
+        for minutos, filtros in grupos.items():
+            if not candidates:
+                break
+            tf_label = _minutos_to_label(minutos)
+            tf_marketdata = timeframe_to_marketdata(tf_label)
+            try:
+                batch = list(candidates)[:200]
+                candles_map = self._client.fetch_candles(batch, tf_label, bars=max(50, minutos))
+            except Exception as e:
+                logger.error("Failed to fetch candles for %s: %s", tf_label, e)
+                continue
+
+            passing = set()
+            for sym in candidates:
+                candles = candles_map.get(sym, [])
+                if not candles:
+                    continue
+                fund = self._fundamentals.get(sym)
+                data = _make_marketdata(sym, fund, candles, None)
+                if all(_get_strategy(f).evaluate(data) for f in filtros):
+                    passing.add(sym)
+            candidates = passing
+
+        result = {}
+        for sym in candidates:
+            result[sym] = [f for f in self.tecnicos
+                          if _get_strategy(f).evaluate(_make_marketdata(sym, self._fundamentals.get(sym), self._candles.get(sym, []), None))]
+        return result
+
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")
         self.cargar_todos()
@@ -205,3 +238,14 @@ class SymbolPipeline:
     @property
     def filtrados(self) -> List[str]:
         return self._filtrados
+
+
+def _minutos_to_label(minutos: int) -> str:
+    if minutos < 60:
+        return f"{minutos}M"
+    elif minutos < 1440:
+        return f"{minutos // 60}H"
+    elif minutos < 10080:
+        return f"{minutos // 1440}D"
+    else:
+        return f"{minutos // 10080}W"

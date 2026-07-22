@@ -57,7 +57,19 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
 
     if pipeline.tecnicos:
         grupos = agrupar_por_timeframe(pipeline.tecnicos)
-        logger.debug("ScannerRunner: timeframes=%s id=%d", sorted(grupos.keys()), escaner.idEscaner)
+        signals = pipeline.evaluar_tecnicos(grupos)
+        if signals:
+            _publish_signals(escaner, signals)
+            logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
+                        escaner.idEscaner, len(signals), list(signals.keys())[:5])
+
+
+def _publish_signals(escaner: Escaner, signals: dict):
+    from app.adapters.scanner_management_client import ScannerManagementClient
+    logger.info("SIGNALS: scanner='%s' id=%d count=%d",
+                escaner.nombre, escaner.idEscaner, len(signals))
+    for symbol, passed_filters in signals.items():
+        logger.info("  -> %s passed: %s", symbol, [f.enumFiltro.name for f in passed_filters])
 
 
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):

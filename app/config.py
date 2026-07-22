@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    puerto: int = 8000
+    http_port: int = 8000
     scanner_management_url: str = "http://scanner-management-service:8081"
     marketdata_url: str = "https://api.metradingplat.net"
     marketdata_user: str = "admin"

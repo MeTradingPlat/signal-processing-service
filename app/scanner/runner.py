@@ -93,12 +93,13 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                 last_date = None
                 next_run = next_trading_window(escaner.horaInicio, now)
                 wait = (next_run - now).total_seconds()
-                if wait > _LONG_SLEEP_SECONDS:
-                    logger.info(
-                        "ScannerRunner: sleeping id=%d until %s (%.0f min)",
-                        escaner.idEscaner, next_run.isoformat(), wait / 60,
-                    )
-                _time.sleep(min(wait, _LONG_SLEEP_SECONDS))
+                logger.info(
+                    "ScannerRunner: sleeping id=%d until %s (%.0f min)",
+                    escaner.idEscaner, next_run.isoformat(), wait / 60,
+                )
+                while wait > 0:
+                    _time.sleep(min(wait, _LONG_SLEEP_SECONDS))
+                    wait = (next_run - datetime.now(timezone.utc)).total_seconds()
     except KeyboardInterrupt:
         logger.info("ScannerRunner: interrupted id=%d", escaner.idEscaner)
 

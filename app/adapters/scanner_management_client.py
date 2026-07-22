@@ -40,3 +40,22 @@ class ScannerManagementClient:
             logger.info("Notified scanner-management: scanner %d stopped", scanner_id)
         except Exception as e:
             logger.error("Failed to notify scanner stop id=%d: %s", scanner_id, e)
+
+    def cleanup_scanner_data(self, scanner_id: int):
+        try:
+            self._cleanup_endpoint(settings.log_service_url, f"/logs/escaner/{scanner_id}")
+        except Exception as e:
+            logger.warning("Failed to cleanup logs for scanner %d: %s", scanner_id, e)
+        try:
+            self._cleanup_endpoint(settings.asset_management_url, f"/activos/escaner/{scanner_id}")
+        except Exception as e:
+            logger.warning("Failed to cleanup assets for scanner %d: %s", scanner_id, e)
+
+    def _cleanup_endpoint(self, base_url: str, path: str):
+        req = urllib.request.Request(
+            f"{base_url}{path}",
+            headers={"Content-Type": "application/json", "X-Gateway-Passed": "true"},
+            method="DELETE",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            logger.info("Cleanup %s%s: %s", base_url, path, resp.status)

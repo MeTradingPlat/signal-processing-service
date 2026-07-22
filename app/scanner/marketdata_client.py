@@ -44,6 +44,7 @@ class MarketdataClient:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self._token}",
+                "X-Gateway-Passed": "true",
             },
             method=method,
         )

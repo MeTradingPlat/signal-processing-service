@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     http_port: int = 8000
     scanner_management_url: str = "http://scanner-management-service:8081"
-    marketdata_url: str = "https://api.metradingplat.net"
+    marketdata_url: str = "http://marketdata-service:8082"
     marketdata_user: str = "admin"
     marketdata_password: str = "Coltes2025!"
     kafka_bootstrap_servers: str = "kafka:29092"

@@ -34,7 +34,7 @@ class MarketdataClient:
     def fetch_symbols(self, mercados: List[str]) -> List[str]:
         mics = [mercado_to_mic(m) for m in mercados]
         params = "&".join(f"markets={m}" for m in mics)
-        data = self._request("GET", f"/marketdata/symbols?{params}")
+        data = self._request("GET", f"/marketdata/symbols?{params}", timeout=120)
         return [s["symbol"] for s in data]
 
     def fetch_fundamentals(self, symbols: List[str]) -> dict[str, FundamentalResponse]:
@@ -60,4 +60,10 @@ class MarketdataClient:
         return {k: CandleResponse(**v) for k, v in raw.items() if v}
 
     def fetch_quotes(self, symbols: List[str]) -> dict[str, float]:
-        return self._request("POST", "/marketdata/quotes/cached", body=symbols)
+        result = {}
+        chunk_size = 500
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i:i + chunk_size]
+            batch = self._request("POST", "/marketdata/quotes/cached", body=chunk)
+            result.update(batch)
+        return result

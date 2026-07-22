@@ -36,10 +36,7 @@ def market_close_time(check_date: date) -> time:
 
 
 def effective_end(escaner_end: time, check_date: date) -> time:
-    close = market_close_time(check_date)
-    if escaner_end <= close:
-        return escaner_end
-    return close
+    return escaner_end
 
 
 def is_trading_day(check_date: date) -> bool:

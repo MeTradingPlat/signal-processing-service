@@ -4,6 +4,10 @@ import urllib.request
 import sys
 import os
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.strategies.fundamentales import (
@@ -49,6 +53,7 @@ def request(token, method, path, body=None):
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
 
+@pytest.mark.integration
 def test_symbol(sym, token):
     print(f"\n{'='*60}")
     print(f"Testing: {sym}")

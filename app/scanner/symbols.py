@@ -172,22 +172,17 @@ class SymbolPipeline:
         if not self.pre_estaticos:
             return
         remaining = []
+        rejected_no_data = 0
         for sym in self._todos:
             fund = self._fundamentals.get(sym)
             if fund is None:
-                remaining.append(sym)
+                rejected_no_data += 1
                 continue
-            ok = True
-            for f in self.pre_estaticos:
-                strategy = _get_strategy(f)
-                data = _make_marketdata(sym, fund, None, None)
-                if not strategy.evaluate(data):
-                    ok = False
-                    break
-            if ok:
+            if all(_get_strategy(f).evaluate(_make_marketdata(sym, fund, None, None))
+                   for f in self.pre_estaticos):
                 remaining.append(sym)
         self._filtrados = remaining
-        logger.info("SymbolPipeline: static filters %d -> %d symbols", len(self._todos), len(self._filtrados))
+        logger.info("SymbolPipeline: static %d->%d (no_data=%d)", len(self._todos), len(self._filtrados), rejected_no_data)
 
     def _aplicar_dinamicos(self):
         if not self.pre_dinamicos:
@@ -196,18 +191,24 @@ class SymbolPipeline:
             quotes = self._client.fetch_quotes(self._filtrados)
         except Exception as e:
             logger.error("Failed to fetch quotes: %s", e)
+            self._filtrados = []
+            return
+        if not quotes:
+            logger.warning("Dynamic filters: no quote data, rejecting all")
+            self._filtrados = []
             return
         remaining = []
         for sym in self._filtrados:
-            fund = self._fundamentals.get(sym)
             price = quotes.get(sym)
-            quote = QuoteResponse(symbol=sym, last=price) if price else None
+            if price is None:
+                continue
+            fund = self._fundamentals.get(sym)
+            quote = QuoteResponse(symbol=sym, last=price)
             data = _make_marketdata(sym, fund, None, quote)
             if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
                 remaining.append(sym)
         self._filtrados = remaining
-        logger.info("SymbolPipeline: dynamic filters %d -> %d symbols",
-                    len(quotes), len(self._filtrados))
+        logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(quotes), len(self._filtrados))
 
     def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[Filtro]]:
         from app.scanner.mappings import timeframe_to_marketdata

@@ -8,6 +8,6 @@ from app.models.valor import Valor
 
 class Parametro(BaseModel):
     enumParametro: EnumParametro
-    etiqueta: str = ""
+    etiqueta: Optional[str] = None
     objValorSeleccionado: Optional[Valor] = None
     opciones: List[Valor] = Field(default_factory=list)

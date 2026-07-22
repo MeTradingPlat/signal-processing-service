@@ -255,6 +255,10 @@ class SymbolPipeline:
     def filtrados(self) -> List[str]:
         return self._filtrados
 
+    @property
+    def pre_filtros(self) -> List[Filtro]:
+        return self.pre_estaticos + self.pre_dinamicos
+
 
 def _minutos_to_label(minutos: int) -> str:
     if minutos < 60:

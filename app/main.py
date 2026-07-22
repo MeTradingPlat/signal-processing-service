@@ -1,91 +1,81 @@
-import asyncio
 import logging
-from concurrent.futures import ProcessPoolExecutor
-from contextlib import asynccontextmanager
+import signal
+import sys
+import threading
+from multiprocessing import Pipe, Process
 
-from fastapi import FastAPI
+import uvicorn
 
+from app.api.server import create_app
 from app.config import settings
-from app.core.fundamentals_cache import FundamentalsCache
-from app.core.gestor_escaneres import GestorEscaneres
-from app.core.halt_monitor import HaltMonitor
-from app.infrastructure.input.kafka_listener import EstadoEscanerKafkaListener
-from app.infrastructure.input.rest_controller import crear_router
-from app.infrastructure.output.escaner_rest_adapter import EscanerRestAdapter
-from app.infrastructure.output.kafka_producer_adapter import KafkaProducerAdapter
-from app.infrastructure.output.marketdata_rest_adapter import MarketdataRestAdapter
+from app.orchestrator.runtime import run_orchestrator
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-# Silenciar librerías ruidosas para ver solo logs de la aplicación
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("aiokafka").setLevel(logging.WARNING)
-logging.getLogger("kafka").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+_RESTART_DELAY = 2.0
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Iniciando signal-processing-service...")
 
-    # Singletons compartidos entre todos los escáneres
-    fundamentals_cache = FundamentalsCache()
-    halt_monitor = HaltMonitor()
-    halt_monitor.iniciar()
-
-    process_pool = ProcessPoolExecutor(max_workers=settings.max_workers_pool)
-
-    kafka_producer = KafkaProducerAdapter(settings.kafka_bootstrap_servers)
-    await kafka_producer.iniciar()
-
-    escaner_rest = EscanerRestAdapter(settings.scanner_management_url)
-    marketdata_rest = MarketdataRestAdapter(settings.marketdata_url)
-
-    gestor = GestorEscaneres(
-        kafka_producer=kafka_producer,
-        marketdata_rest=marketdata_rest,
-        escaner_rest=escaner_rest,
-        process_pool=process_pool,
-        fundamentals_cache=fundamentals_cache,
-        halt_monitor=halt_monitor,
+def _setup_logging():
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stdout,
     )
 
-    app.state.gestor = gestor
 
-    tarea_recuperacion = asyncio.create_task(
-        gestor.recuperar_escaneres_activos()
+def _monitor_orchestrator(orchestrator_process: Process, child_conn):
+    while True:
+        orchestrator_process.join()
+        exit_code = orchestrator_process.exitcode
+        logger.error(
+            "Launcher: orchestrator died pid=%d exitcode=%s, restarting in %.0fs",
+            orchestrator_process.pid,
+            exit_code,
+            _RESTART_DELAY,
+        )
+        orchestrator_process = Process(
+            target=run_orchestrator,
+            args=(child_conn,),
+            name="orchestrator",
+        )
+        orchestrator_process.start()
+        logger.info("Launcher: orchestrator restarted pid=%d", orchestrator_process.pid)
+
+
+def main():
+    _setup_logging()
+
+    parent_conn, child_conn = Pipe()
+
+    orchestrator_process = Process(
+        target=run_orchestrator,
+        args=(child_conn,),
+        name="orchestrator",
     )
+    orchestrator_process.start()
+    logger.info("Launcher: orchestrator spawned pid=%d", orchestrator_process.pid)
 
-    listener = EstadoEscanerKafkaListener(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
-        group_id=settings.kafka_group_id,
-        gestor=gestor,
-        escaner_rest=escaner_rest,
+    monitor_thread = threading.Thread(
+        target=_monitor_orchestrator,
+        args=(orchestrator_process, child_conn),
+        daemon=True,
     )
-    tarea_listener = asyncio.create_task(listener.iniciar())
+    monitor_thread.start()
 
-    logger.info("signal-processing-service iniciado correctamente")
+    def _shutdown(signum, frame):
+        logger.info("Launcher: received signal %d, shutting down", signum)
+        orchestrator_process.terminate()
+        orchestrator_process.join(timeout=5)
+        sys.exit(0)
 
-    yield
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
 
-    logger.info("Deteniendo signal-processing-service...")
-    tarea_listener.cancel()
-    tarea_recuperacion.cancel()
-    halt_monitor.detener()
-    await gestor.detener_todos()
-    process_pool.shutdown(wait=False)
-    await kafka_producer.detener()
-    await escaner_rest.cerrar()
-    await marketdata_rest.cerrar()
-    logger.info("signal-processing-service detenido")
+    app = create_app(parent_conn)
+
+    logger.info("Launcher: starting HTTP API on %s:%d", settings.http_host, settings.http_port)
+    uvicorn.run(app, host=settings.http_host, port=settings.http_port, log_level=settings.log_level.lower())
 
 
-app = FastAPI(
-    title="Signal Processing Service",
-    lifespan=lifespan,
-)
-
-app.include_router(crear_router())
+if __name__ == "__main__":
+    main()

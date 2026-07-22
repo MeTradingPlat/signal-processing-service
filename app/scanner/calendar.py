@@ -23,10 +23,10 @@ _EARLY_CLOSE_DATES: set[date] = {
     date(2026, 12, 24),
 }
 
-_EARLY_CLOSE_TIME = time(13, 0, 0)
+_EARLY_CLOSE_TIME = time(17, 0, 0)
 
 
-_REGULAR_CLOSE = time(16, 0, 0)
+_REGULAR_CLOSE = time(20, 0, 0)
 
 
 def market_close_time(check_date: date) -> time:

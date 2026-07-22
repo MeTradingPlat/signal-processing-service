@@ -7,25 +7,25 @@ from app.models.enums import EnumCondicional, EnumTipoValor
 
 class ValorFloat(BaseModel):
     enumTipoValor: Literal[EnumTipoValor.FLOAT] = EnumTipoValor.FLOAT
-    etiqueta: str = ""
+    etiqueta: Optional[str] = None
     valor: Optional[float] = None
 
 
 class ValorInteger(BaseModel):
     enumTipoValor: Literal[EnumTipoValor.INTEGER] = EnumTipoValor.INTEGER
-    etiqueta: str = ""
+    etiqueta: Optional[str] = None
     valor: Optional[int] = None
 
 
 class ValorString(BaseModel):
     enumTipoValor: Literal[EnumTipoValor.STRING] = EnumTipoValor.STRING
-    etiqueta: str = ""
+    etiqueta: Optional[str] = None
     valor: Optional[str] = None
 
 
 class ValorCondicional(BaseModel):
     enumTipoValor: Literal[EnumTipoValor.CONDICIONAL] = EnumTipoValor.CONDICIONAL
-    etiqueta: str = ""
+    etiqueta: Optional[str] = None
     enumCondicional: Optional[EnumCondicional] = None
     isInteger: bool = False
     valor1: Optional[float] = None

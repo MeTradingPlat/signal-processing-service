@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from app.models.enums import EnumCategoriaFiltro
+from app.models.enums import EnumCategoriaFiltro, EnumFiltro
 from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.scanner.marketdata_client import MarketdataClient

@@ -33,6 +33,7 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     producer = _get_producer()
     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
+    signal_count = 0
     for symbol, passed_filters in signals.items():
         filtros_json = json.dumps([f.enumFiltro.name for f in passed_filters])
         signal_event = {
@@ -44,23 +45,25 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
             "timestamp": now,
             "servicioOrigen": settings.servicio_origen,
         }
-        log_event = {
-            "servicioOrigen": settings.servicio_origen,
-            "nivel": "INFO",
-            "mensaje": f"Señal generada para {symbol} - filtros: {filtros_json}",
-            "idEscaner": scanner_id,
-            "symbol": symbol,
-            "categoria": "SIGNAL",
-            "timestamp": now,
-        }
         try:
             if producer and producer is not False:
                 producer.send("signals", key=symbol, value=signal_event)
-                producer.send("logs", key=symbol, value=log_event)
-            logger.info("SIGNAL: scanner='%s' symbol=%s filters=%s",
-                        scanner_name, symbol, filtros_json)
+            signal_count += 1
+            logger.debug("SIGNAL: scanner='%s' symbol=%s", scanner_name, symbol)
         except Exception as e:
             logger.error("Failed to publish signal for %s: %s", symbol, e)
+
+    if signal_count > 0 and producer and producer is not False:
+        log_event = {
+            "servicioOrigen": settings.servicio_origen,
+            "nivel": "INFO",
+            "mensaje": f"Escáner completado: {signal_count} señales generadas",
+            "idEscaner": scanner_id,
+            "categoria": "SIGNAL",
+            "timestamp": now,
+        }
+        producer.send("logs", key=str(scanner_id), value=log_event)
+    logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
 
 
 def publish_scanner_state(scanner_id: int, estado_nuevo: str, razon: str):

@@ -45,7 +45,7 @@ def _sync_active_scanners(registry: ProcessRegistry):
     client = ScannerManagementClient()
     active = client.get_active_scanners()
     for escaner in active:
-        process = Process(target=run_scanner, args=(escaner,), daemon=False)
+        process = Process(target=run_scanner, args=(escaner,), daemon=True)
         process.start()
         registry.add(escaner.idEscaner, process)
         logger.info("Sync: restored scanner id=%d name='%s' pid=%d",

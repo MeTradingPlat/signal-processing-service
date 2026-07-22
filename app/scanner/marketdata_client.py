@@ -28,7 +28,7 @@ class MarketdataClient:
         req = urllib.request.Request(
             f"{self._base}/auth/login",
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "X-Gateway-Passed": "true"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

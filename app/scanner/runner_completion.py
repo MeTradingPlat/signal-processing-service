@@ -1,21 +1,12 @@
-import json
 import logging
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 
 def publish_scanner_completed(scanner_id: int):
-    event = {
-        "idEscaner": scanner_id,
-        "nombreEscaner": "",
-        "estadoAnterior": "INICIADO",
-        "estadoNuevo": "DETENIDO",
-        "razon": "ESCANER_UNA_VEZ completado",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "servicioOrigen": "signal-processing-service",
-    }
-    logger.info(
-        "KAFKA-SIM: publishing to scanner.state -> %s",
-        json.dumps(event),
-    )
+    from app.adapters.scanner_management_client import ScannerManagementClient
+    from app.infrastructure.output.kafka_producer import publish_scanner_state
+
+    ScannerManagementClient().notify_scanner_stopped(scanner_id)
+    publish_scanner_state(scanner_id, "DETENIDO", "ESCANER_UNA_VEZ completado")
+    logger.info("Scanner %d completed, notified scanner-management + Kafka", scanner_id)

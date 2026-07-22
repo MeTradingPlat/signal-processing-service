@@ -51,9 +51,9 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
     logger.info("ScannerRunner: UNA_VEZ completed id=%d", escaner.idEscaner)
 
 
-def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
+def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, first_cycle_of_day: bool = False):
     logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
-    pipeline.aplicar_pre_filtros()
+    pipeline.aplicar_pre_filtros(first_cycle_of_day=first_cycle_of_day)
 
     if pipeline.tecnicos:
         grupos = agrupar_por_timeframe(pipeline.tecnicos)
@@ -65,11 +65,10 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
 
 
 def _publish_signals(escaner: Escaner, signals: dict):
-    from app.adapters.scanner_management_client import ScannerManagementClient
+    from app.infrastructure.output.kafka_producer import publish_signals as kafka_publish
     logger.info("SIGNALS: scanner='%s' id=%d count=%d",
                 escaner.nombre, escaner.idEscaner, len(signals))
-    for symbol, passed_filters in signals.items():
-        logger.info("  -> %s passed: %s", symbol, [f.enumFiltro.name for f in passed_filters])
+    kafka_publish(escaner.idEscaner, escaner.nombre, signals)
 
 
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):
@@ -114,16 +113,6 @@ def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: dateti
         if _now is not None:
             return
         _time.sleep(_CYCLE_SECONDS)
-
-
-def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, first_cycle_of_day: bool = False):
-    logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
-    pipeline.aplicar_pre_filtros(first_cycle_of_day=first_cycle_of_day)
-
-    if pipeline.tecnicos:
-        grupos = agrupar_por_timeframe(pipeline.tecnicos)
-        logger.debug("ScannerRunner: timeframes=%s id=%d", sorted(grupos.keys()), escaner.idEscaner)
-
 
 def _sleep_until(target: datetime, _now: datetime | None = None):
     if _now is not None:

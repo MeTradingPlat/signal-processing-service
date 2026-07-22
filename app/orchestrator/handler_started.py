@@ -20,7 +20,7 @@ def handle_scanner_started(registry: ProcessRegistry, payload: Escaner):
             existing.terminate()
             existing.join(timeout=3)
 
-    process = Process(target=run_scanner, args=(payload,), daemon=False)
+    process = Process(target=run_scanner, args=(payload,), daemon=True)
     process.start()
     registry.add(payload.idEscaner, process)
     logger.info(

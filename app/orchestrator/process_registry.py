@@ -29,7 +29,10 @@ class ProcessRegistry:
             return
         if process.is_alive():
             process.terminate()
-            process.join(timeout=3)
+            try:
+                process.join(timeout=3)
+            except AssertionError:
+                pass
             logger.info(
                 "Registry: terminated scanner_id=%d pid=%d",
                 scanner_id,
@@ -48,7 +51,10 @@ class ProcessRegistry:
         ]
         for sid in completed:
             proc = self._processes.pop(sid)
-            proc.join()
+            try:
+                proc.join()
+            except AssertionError:
+                pass
             logger.info(
                 "Registry: process completed scanner_id=%d pid=%d total_active=%d",
                 sid,

@@ -192,6 +192,22 @@ class SymbolPipeline:
     def _aplicar_dinamicos(self):
         if not self.pre_dinamicos:
             return
+        try:
+            quotes = self._client.fetch_quotes(self._filtrados)
+        except Exception as e:
+            logger.error("Failed to fetch quotes: %s", e)
+            return
+        remaining = []
+        for sym in self._filtrados:
+            fund = self._fundamentals.get(sym)
+            price = quotes.get(sym)
+            quote = QuoteResponse(symbol=sym, last=price) if price else None
+            data = _make_marketdata(sym, fund, None, quote)
+            if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
+                remaining.append(sym)
+        self._filtrados = remaining
+        logger.info("SymbolPipeline: dynamic filters %d -> %d symbols",
+                    len(quotes), len(self._filtrados))
 
     def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[Filtro]]:
         from app.scanner.mappings import timeframe_to_marketdata

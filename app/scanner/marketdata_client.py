@@ -84,6 +84,6 @@ class MarketdataClient:
         chunk_size = 500
         for i in range(0, len(symbols), chunk_size):
             chunk = symbols[i:i + chunk_size]
-            batch = self._request("POST", "/marketdata/quotes/cached", body=chunk)
+            batch = self._request("POST", "/marketdata/quotes/rest", body=chunk)
             result.update(batch)
         return result

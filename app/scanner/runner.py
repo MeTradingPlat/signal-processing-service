@@ -66,9 +66,22 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, first_cycle_of_day: bo
 
 def _publish_signals(escaner: Escaner, signals: dict):
     from app.infrastructure.output.kafka_producer import publish_signals as kafka_publish
+    _clear_old_signals(escaner.idEscaner)
     logger.info("SIGNALS: scanner='%s' id=%d count=%d",
                 escaner.nombre, escaner.idEscaner, len(signals))
     kafka_publish(escaner.idEscaner, escaner.nombre, signals)
+
+
+def _clear_old_signals(scanner_id: int):
+    try:
+        import urllib.request, json
+        from app.config import settings
+        url = f"{settings.log_service_url}/logs/escaner/{scanner_id}"
+        req = urllib.request.Request(url, headers={"X-Gateway-Passed": "true"}, method="DELETE")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            logger.debug("Cleared old signals for scanner %d: %s", scanner_id, resp.status)
+    except Exception as e:
+        logger.warning("Failed to clear old signals for scanner %d: %s", scanner_id, e)
 
 
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):

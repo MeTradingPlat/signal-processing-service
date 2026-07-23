@@ -184,8 +184,11 @@ class SymbolPipeline:
         if not self._todos:
             return
         try:
-            batch = self._todos[:200]
-            self._fundamentals = self._client.fetch_fundamentals(batch)
+            self._fundamentals = {}
+            for i in range(0, len(self._todos), 200):
+                batch = self._todos[i:i + 200]
+                batch_data = self._client.fetch_fundamentals(batch)
+                self._fundamentals.update(batch_data)
             logger.info("SymbolPipeline: loaded fundamentals for %d symbols", len(self._fundamentals))
         except Exception as e:
             logger.error("SymbolPipeline: fundamentals fetch failed: %s", e)

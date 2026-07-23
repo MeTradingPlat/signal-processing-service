@@ -80,10 +80,17 @@ class MarketdataClient:
         return {k: CandleResponse(**v) for k, v in raw.items() if v}
 
     def fetch_quotes(self, symbols: List[str]) -> dict[str, float]:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        chunk_size = 100
+        chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
+
         result = {}
-        chunk_size = 500
-        for i in range(0, len(symbols), chunk_size):
-            chunk = symbols[i:i + chunk_size]
-            batch = self._request("POST", "/marketdata/quotes/rest", body=chunk)
-            result.update(batch)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(self._request, "POST", "/marketdata/quotes/rest", body=c, timeout=15): c for c in chunks}
+            for future in as_completed(futures, timeout=30):
+                try:
+                    result.update(future.result())
+                except Exception:
+                    pass
         return result

@@ -33,6 +33,13 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     producer = _get_producer()
     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
+    clear_event = {
+        "type": "CLEAR_SCANNER_SIGNALS",
+        "servicioOrigen": settings.servicio_origen,
+        "idEscaner": scanner_id,
+        "timestamp": now,
+    }
+
     signal_count = 0
     for symbol, passed_filters in signals.items():
         filtros_json = json.dumps([f.enumFiltro.name for f in passed_filters])
@@ -59,6 +66,8 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
         }
         try:
             if producer and producer is not False:
+                producer.send("logs", key=str(scanner_id), value=clear_event)
+                clear_event = None
                 producer.send("signals", key=symbol, value=signal_event)
                 producer.send("logs", key=str(scanner_id), value=log_event)
             signal_count += 1
@@ -68,7 +77,9 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
 
     if producer and producer is not False:
         producer.flush()
-    logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
+
+    if signal_count > 0 and producer and producer is not False:
+        logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
 
 
 def publish_scanner_state(scanner_id: int, estado_nuevo: str, razon: str):

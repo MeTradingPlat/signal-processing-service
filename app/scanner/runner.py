@@ -30,6 +30,7 @@ def run_scanner(escaner: Escaner):
     )
 
     pipeline.cargar_todos()
+    _clear_old_signals(escaner.idEscaner)
 
     if escaner.objTipoEjecucion.enumTipoEjecucion == EnumTipoEjecucion.UNA_VEZ:
         _run_once(escaner, pipeline)

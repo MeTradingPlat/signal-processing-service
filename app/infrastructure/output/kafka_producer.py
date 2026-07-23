@@ -53,16 +53,6 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
         except Exception as e:
             logger.error("Failed to publish signal for %s: %s", symbol, e)
 
-    if signal_count > 0 and producer and producer is not False:
-        log_event = {
-            "servicioOrigen": settings.servicio_origen,
-            "nivel": "INFO",
-            "mensaje": f"Escáner completado: {signal_count} señales generadas",
-            "idEscaner": scanner_id,
-            "categoria": "SIGNAL",
-            "timestamp": now,
-        }
-        producer.send("logs", key=str(scanner_id), value=log_event)
     logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
 
 

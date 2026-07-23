@@ -53,6 +53,8 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
         except Exception as e:
             logger.error("Failed to publish signal for %s: %s", symbol, e)
 
+    if producer and producer is not False:
+        producer.flush()
     logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
 
 

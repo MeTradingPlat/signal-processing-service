@@ -292,10 +292,10 @@ class SymbolPipeline:
 
 def _minutos_to_label(minutos: int) -> str:
     if minutos < 60:
-        return f"{minutos}M"
+        return f"M{minutos}"
     elif minutos < 1440:
-        return f"{minutos // 60}H"
+        return f"H{minutos // 60}"
     elif minutos < 10080:
-        return f"{minutos // 1440}D"
+        return f"D{minutos // 1440}"
     else:
-        return f"{minutos // 10080}W"
+        return f"W{minutos // 10080}"

@@ -66,8 +66,10 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
         }
         try:
             if producer and producer is not False:
-                producer.send("logs", key=str(scanner_id), value=clear_event)
-                clear_event = None
+                if clear_event is not None:
+                    producer.send("signals", key=str(scanner_id), value=clear_event)
+                    producer.send("logs", key=str(scanner_id), value=clear_event)
+                    clear_event = None
                 producer.send("signals", key=symbol, value=signal_event)
                 producer.send("logs", key=str(scanner_id), value=log_event)
             signal_count += 1

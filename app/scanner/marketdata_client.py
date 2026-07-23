@@ -90,7 +90,9 @@ class MarketdataClient:
             futures = {executor.submit(self._request, "POST", "/marketdata/quotes/rest", body=c, timeout=15): c for c in chunks}
             for future in as_completed(futures, timeout=30):
                 try:
-                    result.update(future.result())
-                except Exception:
-                    pass
+                    batch = future.result()
+                    if batch:
+                        result.update(batch)
+                except Exception as e:
+                    logger.warning(f"Quote chunk failed: {e}")
         return result

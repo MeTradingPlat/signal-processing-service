@@ -53,25 +53,12 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
             "timestamp": now,
             "servicioOrigen": settings.servicio_origen,
         }
-        log_event = {
-            "servicioOrigen": settings.servicio_origen,
-            "nivel": "INFO",
-            "mensaje": f"Señal generada: {symbol}",
-            "idEscaner": scanner_id,
-            "categoria": "SIGNAL",
-            "symbol": symbol,
-            "tipo": "ENTRADA",
-            "metadatos": filtros_nombres,
-            "timestamp": now,
-        }
         try:
             if producer and producer is not False:
                 if clear_event is not None:
                     producer.send("signals", key=str(scanner_id), value=clear_event)
-                    producer.send("logs", key=str(scanner_id), value=clear_event)
                     clear_event = None
                 producer.send("signals", key=symbol, value=signal_event)
-                producer.send("logs", key=str(scanner_id), value=log_event)
             signal_count += 1
             logger.debug("SIGNAL: scanner='%s' symbol=%s filters=%s", scanner_name, symbol, filtros_nombres)
         except Exception as e:

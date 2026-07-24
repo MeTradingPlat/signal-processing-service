@@ -27,7 +27,6 @@ class QuoteResponse(BaseModel):
     close: Optional[float] = None
     prevClose: Optional[float] = None
     volume: Optional[float] = None
-    vwap: Optional[float] = None
     tradingHalted: Optional[bool] = None
     tradingHaltedReason: Optional[str] = None
     beta: Optional[float] = None

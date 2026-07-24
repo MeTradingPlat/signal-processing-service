@@ -45,6 +45,10 @@ def _monitor_orchestrator(orchestrator_process: Process, child_conn):
 def main():
     _setup_logging()
 
+    from app.adapters.readiness import wait_for_dependencies
+    logger.info("Launcher: waiting for scanner-management and marketdata to be reachable...")
+    wait_for_dependencies()
+
     parent_conn, child_conn = Pipe()
 
     orchestrator_process = Process(

@@ -51,6 +51,13 @@ class MarketdataClient:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
 
+    def is_ready(self) -> bool:
+        try:
+            self.fetch_symbols(["NASDAQ"])
+            return True
+        except Exception:
+            return False
+
     def fetch_symbols(self, mercados: List[str]) -> List[str]:
         mics = [mercado_to_mic(m) for m in mercados]
         params = "&".join(f"markets={m}" for m in mics)

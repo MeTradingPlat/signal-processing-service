@@ -153,6 +153,7 @@ def _calc_sma(values: list[float], period: int) -> float:
 
 
 def _calc_atr(candles: list[CandleResponse], period: int) -> float:
+    """Wilder's ATR: initial SMA then smoothed (Prior ATR * (N-1) + TR) / N"""
     if len(candles) < 2:
         return 0.0
     tr_values = []
@@ -162,27 +163,38 @@ def _calc_atr(candles: list[CandleResponse], period: int) -> float:
         h = c.high or 0.0
         l = c.low or 0.0
         pc = prev.close or 0.0
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        tr_values.append(tr)
+        tr_values.append(max(h - l, abs(h - pc), abs(l - pc)))
     if not tr_values:
         return 0.0
-    return _calc_sma(tr_values, period) if len(tr_values) >= period else sum(tr_values) / len(tr_values)
+    if len(tr_values) <= period:
+        return sum(tr_values) / len(tr_values)
+    atr = sum(tr_values[:period]) / period
+    for i in range(period, len(tr_values)):
+        atr = (atr * (period - 1) + tr_values[i]) / period
+    return atr
 
 
 def _calc_rsi(candles: list[CandleResponse], period: int) -> float:
+    """Wilder's RSI: initial SMA then smoothed avg gain/loss"""
     if len(candles) < period + 1:
         return 50.0
-    closes = [(c.close or 0.0) for c in candles[-period - 1:]]
-    gains = 0.0
-    losses = 0.0
-    for i in range(1, len(closes)):
-        diff = closes[i] - closes[i - 1]
-        if diff > 0:
-            gains += diff
-        else:
-            losses -= diff
-    avg_gain = gains / period
-    avg_loss = losses / period
+    closes = [(c.close or 0.0) for c in candles]
+    changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [c for c in changes if c > 0]
+    losses = [-c for c in changes if c < 0]
+    if not gains and not losses:
+        return 50.0
+    if len(changes) <= period:
+        avg_gain = sum(gains) / len(changes) if gains else 0.0
+        avg_loss = sum(losses) / len(changes) if losses else 0.0
+    else:
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+        for i in range(period, len(changes)):
+            g = changes[i] if changes[i] > 0 else 0.0
+            l = -changes[i] if changes[i] < 0 else 0.0
+            avg_gain = (avg_gain * (period - 1) + g) / period
+            avg_loss = (avg_loss * (period - 1) + l) / period
     if avg_loss == 0:
         return 100.0
     rs = avg_gain / avg_loss

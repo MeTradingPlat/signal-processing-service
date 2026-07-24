@@ -24,6 +24,13 @@ class ScannerManagementClient:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
 
+    def is_ready(self) -> bool:
+        try:
+            self._request("GET", "/escaner/iniciados")
+            return True
+        except Exception:
+            return False
+
     def get_active_scanners(self) -> List[Escaner]:
         try:
             raw = self._request("GET", "/escaner/iniciados")

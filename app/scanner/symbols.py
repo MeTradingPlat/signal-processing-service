@@ -220,20 +220,20 @@ class SymbolPipeline:
         if not self.pre_dinamicos:
             return
         try:
-            quotes = self._client.fetch_vwap_quotes(self._filtrados)
+            quotes = self._client.fetch_quotes(self._filtrados)
         except Exception as e:
-            logger.error("Failed to fetch vwap quotes, keeping previous filtered set: %s", e)
+            logger.error("Failed to fetch quotes, keeping previous filtered set: %s", e)
             return
         if not quotes:
             logger.warning("Dynamic filters: no quote data, keeping previous filtered set")
             return
         remaining = []
         for sym in self._filtrados:
-            q = quotes.get(sym)
-            if q is None:
+            price = quotes.get(sym)
+            if price is None:
                 continue
             fund = self._fundamentals.get(sym)
-            quote = QuoteResponse(symbol=sym, last=q.get("last"), volume=q.get("volume"), vwap=q.get("vwap"))
+            quote = QuoteResponse(symbol=sym, last=price)
             data = _make_marketdata(sym, fund, None, quote)
             if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
                 remaining.append(sym)

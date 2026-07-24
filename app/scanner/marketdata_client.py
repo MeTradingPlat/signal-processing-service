@@ -86,20 +86,20 @@ class MarketdataClient:
         raw = data.get("candlePorSimbolo", {})
         return {k: CandleResponse(**v) for k, v in raw.items() if v}
 
-    def fetch_vwap_quotes(self, symbols: List[str]) -> dict[str, dict]:
+    def fetch_quotes(self, symbols: List[str]) -> dict[str, float]:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        chunk_size = 300
+        chunk_size = 100
         chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
 
         result = {}
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            futures = {executor.submit(self._request, "POST", "/marketdata/vwap/rest", body=c, timeout=15): c for c in chunks}
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(self._request, "POST", "/marketdata/quotes/rest", body=c, timeout=15): c for c in chunks}
             for future in as_completed(futures, timeout=30):
                 try:
                     batch = future.result()
                     if batch:
                         result.update(batch)
                 except Exception as e:
-                    logger.warning(f"VWAP chunk failed: {e}")
+                    logger.warning(f"Quote chunk failed: {e}")
         return result

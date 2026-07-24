@@ -3,6 +3,15 @@ from app.strategies.base import FilterStrategy, MarketData
 from app.strategies.precio_movimiento import _calc_ema, _calc_rsi, _calc_sma, _calc_vwap
 
 
+def _effective_vwap(data: MarketData) -> float:
+    """Prefer the live tick-accumulated VWAP; fall back to candle-based estimate."""
+    if data.quote and data.quote.vwap:
+        return data.quote.vwap
+    if data.candles:
+        return _calc_vwap(data.candles)
+    return 0.0
+
+
 class RSIStrategy(FilterStrategy):
     """Relative Strength Index."""
 
@@ -19,7 +28,7 @@ class DistanceFromVWAPStrategy(FilterStrategy):
     def compute_value(self, data: MarketData) -> float:
         if not data.candles:
             return 0.0
-        vwap = _calc_vwap(data.candles)
+        vwap = _effective_vwap(data)
         if vwap <= 0:
             return 0.0
         price = data.candles[-1].close or 0.0
@@ -78,7 +87,7 @@ class ThroughEMAVWAPAlertStrategy(FilterStrategy):
         periodo = self._param_int(EnumParametro.THROUGH_EMA_VWAP_PERIODO_EMA, 9)
         closes = [c.close or 0.0 for c in data.candles]
         if linea == "VWAP":
-            ref = _calc_vwap(data.candles)
+            ref = _effective_vwap(data)
         else:
             ref = _calc_ema(closes, periodo)
         if ref <= 0:
@@ -96,7 +105,7 @@ class EMAVWAPSupportResistanceStrategy(FilterStrategy):
         periodo = self._param_int(EnumParametro.PERIODO_EMA_EMA_VWAP_SUPPORT, 9)
         closes = [c.close or 0.0 for c in data.candles]
         if linea == "VWAP":
-            ref = _calc_vwap(data.candles)
+            ref = _effective_vwap(data)
         else:
             ref = _calc_ema(closes, periodo)
         if ref <= 0:

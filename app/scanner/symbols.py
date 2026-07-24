@@ -222,12 +222,10 @@ class SymbolPipeline:
         try:
             quotes = self._client.fetch_quotes(self._filtrados)
         except Exception as e:
-            logger.error("Failed to fetch quotes: %s", e)
-            self._filtrados = []
+            logger.error("Failed to fetch quotes, keeping previous filtered set: %s", e)
             return
         if not quotes:
-            logger.warning("Dynamic filters: no quote data, rejecting all")
-            self._filtrados = []
+            logger.warning("Dynamic filters: no quote data, keeping previous filtered set")
             return
         remaining = []
         for sym in self._filtrados:

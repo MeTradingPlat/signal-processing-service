@@ -202,13 +202,27 @@ def _calc_rsi(candles: list[CandleResponse], period: int) -> float:
 
 
 def _calc_vwap(candles: list[CandleResponse]) -> float:
+    """VWAP: Σ(TypicalPrice × Volume) / Σ(Volume). Resets daily (only today's candles)."""
     if not candles:
         return 0.0
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date()
     tv = 0.0
     tp = 0.0
     for c in candles:
+        if c.timestamp and c.timestamp.date() != today:
+            continue
         typical = ((c.high or 0.0) + (c.low or 0.0) + (c.close or 0.0)) / 3.0
         vol = c.volume or 0.0
         tv += typical * vol
         tp += vol
+    if tp <= 0:
+        recent = [c for c in candles if c.timestamp and c.timestamp.date() == today]
+        if not recent:
+            recent = candles[-max(1, len(candles) // 10):]
+        for c in recent:
+            typical = ((c.high or 0.0) + (c.low or 0.0) + (c.close or 0.0)) / 3.0
+            vol = c.volume or 0.0
+            tv += typical * vol
+            tp += vol
     return tv / tp if tp > 0 else 0.0

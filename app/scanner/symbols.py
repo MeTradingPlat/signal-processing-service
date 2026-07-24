@@ -253,7 +253,8 @@ class SymbolPipeline:
             tf_marketdata = timeframe_to_marketdata(tf_label)
             try:
                 batch = list(candidates)[:200]
-                candles_map = self._client.fetch_candles(batch, tf_label, bars=max(50, minutos))
+                bars_needed = max(150, minutos * 2)
+                candles_map = self._client.fetch_candles(batch, tf_label, bars=bars_needed)
             except Exception as e:
                 logger.error("Failed to fetch candles for %s: %s", tf_label, e)
                 continue

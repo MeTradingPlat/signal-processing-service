@@ -22,11 +22,14 @@ class FilterStrategy(ABC):
         self.condition = self._extract_condition()
 
     @abstractmethod
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         ...
 
     def evaluate(self, data: MarketData) -> bool:
-        return evaluate_condition(self.condition, self.compute_value(data))
+        value = self.compute_value(data)
+        if value is None:
+            return False
+        return evaluate_condition(self.condition, value)
 
     def _extract_condition(self) -> ValorCondicional | None:
         for p in self.filtro.parametros:

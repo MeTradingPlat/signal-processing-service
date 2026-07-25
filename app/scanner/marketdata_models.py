@@ -73,3 +73,5 @@ class FundamentalResponse(BaseModel):
     impliedVolatilityPercentile: Optional[float] = None
     liquidity: Optional[float] = None
     liquidityRating: Optional[int] = None
+    isEtf: Optional[bool] = None
+    securityType: Optional[str] = None

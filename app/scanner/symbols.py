@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, List, Optional
 
 from app.models.enums import EnumCategoriaFiltro, EnumFiltro
@@ -108,6 +109,8 @@ _DYNAMIC_PRE: set[EnumCategoriaFiltro] = {
 
 _ALL_PRE = _STATIC_PRE | _DYNAMIC_PRE
 
+_FUNDAMENTALS_REFRESH_SECONDS = 600.0
+
 _FILTRO_CATEGORY_FALLBACK: dict[EnumFiltro, EnumCategoriaFiltro] = {
     EnumFiltro.FLOAT: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
     EnumFiltro.SHARES_OUTSTANDING: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
@@ -163,6 +166,7 @@ class SymbolPipeline:
         self._client = MarketdataClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
         self._candles: Dict[str, List[CandleResponse]] = {}
+        self._last_fundamentals_fetch = 0.0
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
             escaner.idEscaner, self.mercados,
@@ -194,8 +198,10 @@ class SymbolPipeline:
             logger.error("SymbolPipeline: fundamentals fetch failed: %s", e)
 
     def aplicar_pre_filtros(self, first_cycle_of_day: bool = False):
-        if first_cycle_of_day or not self._estaticos_aplicados:
+        stale = (time.monotonic() - self._last_fundamentals_fetch) >= _FUNDAMENTALS_REFRESH_SECONDS
+        if first_cycle_of_day or not self._estaticos_aplicados or stale:
             self._fetch_fundamentals()
+            self._last_fundamentals_fetch = time.monotonic()
             self._aplicar_estaticos()
             self._estaticos_aplicados = True
         self._aplicar_dinamicos()

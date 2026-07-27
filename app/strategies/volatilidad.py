@@ -6,9 +6,9 @@ from app.strategies.precio_movimiento import _calc_atr
 class ATRStrategy(FilterStrategy):
     """Average True Range over N candles."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles:
-            return 0.0
+            return None
         period = self._param_int(EnumParametro.LONGITUD_ATR, 14)
         return _calc_atr(data.candles, period)
 
@@ -16,26 +16,28 @@ class ATRStrategy(FilterStrategy):
 class ATRPStrategy(FilterStrategy):
     """ATR as percentage of price."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles:
-            return 0.0
+            return None
         period = self._param_int(EnumParametro.PERIODO_ATR_ATRP, 14)
         atr = _calc_atr(data.candles, period)
-        price = (data.candles[-1].close or 0.0) if data.candles else 0.0
-        if price <= 0:
-            return 0.0
+        price = data.candles[-1].close
+        if atr is None or price is None or price <= 0:
+            return None
         return (atr / price) * 100.0
 
 
 class RelativeRangeStrategy(FilterStrategy):
     """Current candle range relative to ATR."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
-            return 0.0
+            return None
         current = data.candles[-1]
-        c_range = (current.high or 0.0) - (current.low or 0.0)
+        if current.high is None or current.low is None:
+            return None
+        c_range = current.high - current.low
         atr = _calc_atr(data.candles, 14)
-        if atr <= 0:
-            return 0.0
+        if atr is None or atr <= 0:
+            return None
         return (c_range / atr) * 100.0

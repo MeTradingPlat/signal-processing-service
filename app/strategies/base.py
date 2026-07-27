@@ -1,3 +1,4 @@
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -5,6 +6,8 @@ from app.models.filtro import Filtro
 from app.models.valor import ValorCondicional, ValorFloat, ValorInteger, ValorString
 from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
 from app.strategies.condition import evaluate_condition
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,6 +31,10 @@ class FilterStrategy(ABC):
     def evaluate(self, data: MarketData) -> bool:
         value = self.compute_value(data)
         if value is None:
+            logger.debug(
+                "%s: %s returned None (missing data), filter not matched",
+                data.symbol, type(self).__name__,
+            )
             return False
         return evaluate_condition(self.condition, value)
 

@@ -15,6 +15,28 @@ logger = logging.getLogger(__name__)
 _LONG_SLEEP_SECONDS = 5.0
 _CYCLE_SECONDS = 60.0
 _REALTIME_SECONDS = 1.0
+_BAR_CLOSE_BUFFER_SECONDS = 1.0
+
+
+def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
+    """Seconds to sleep before the next cycle.
+
+    Defaults to the flat _CYCLE_SECONDS cadence, but when the tightest
+    technical filter's timeframe closes within that same window (in
+    practice only M1), sleeps until _BAR_CLOSE_BUFFER_SECONDS after that
+    bar's close instead. Without this, a plain 60s-after-last-cycle sleep
+    drifts against wall-clock minute boundaries and can poll marketdata a
+    couple of seconds before the bar closes, silently working with a
+    minute-old bar until the next cycle picks it up.
+    """
+    if not pipeline.tecnicos:
+        return _CYCLE_SECONDS
+    min_minutos = min(agrupar_por_timeframe(pipeline.tecnicos))
+    period = min_minutos * 60.0
+    if period > _CYCLE_SECONDS:
+        return _CYCLE_SECONDS
+    seconds_into_period = now.timestamp() % period
+    return (period - seconds_into_period) + _BAR_CLOSE_BUFFER_SECONDS
 
 
 def run_scanner(escaner: Escaner):
@@ -102,7 +124,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     _do_cycle(escaner, pipeline, first_cycle_of_day=True)
                 else:
                     _do_cycle(escaner, pipeline)
-                _time.sleep(_CYCLE_SECONDS)
+                _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))
             else:
                 last_date = None
                 next_run = next_trading_window(escaner.horaInicio, now)
@@ -127,7 +149,7 @@ def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: dateti
         _do_cycle(escaner, pipeline)
         if _now is not None:
             return
-        _time.sleep(_CYCLE_SECONDS)
+        _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))
 
 def _sleep_until(target: datetime, _now: datetime | None = None):
     if _now is not None:

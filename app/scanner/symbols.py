@@ -1,5 +1,4 @@
 import logging
-import time
 from typing import Dict, List, Optional
 
 from app.models.enums import EnumCategoriaFiltro, EnumFiltro
@@ -109,8 +108,6 @@ _DYNAMIC_PRE: set[EnumCategoriaFiltro] = {
 
 _ALL_PRE = _STATIC_PRE | _DYNAMIC_PRE
 
-_FUNDAMENTALS_REFRESH_SECONDS = 600.0
-
 _FILTRO_CATEGORY_FALLBACK: dict[EnumFiltro, EnumCategoriaFiltro] = {
     EnumFiltro.FLOAT: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
     EnumFiltro.SHARES_OUTSTANDING: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
@@ -162,10 +159,8 @@ class SymbolPipeline:
         self.pre_estaticos, self.pre_dinamicos, self.tecnicos = categorizar_filtros(escaner.filtros)
         self._todos: List[str] = []
         self._filtrados: List[str] = []
-        self._estaticos_aplicados = False
         self._client = MarketdataClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
-        self._last_fundamentals_fetch = 0.0
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
             escaner.idEscaner, self.mercados,
@@ -196,13 +191,9 @@ class SymbolPipeline:
         except Exception as e:
             logger.error("SymbolPipeline: fundamentals fetch failed: %s", e)
 
-    def aplicar_pre_filtros(self, first_cycle_of_day: bool = False):
-        stale = (time.monotonic() - self._last_fundamentals_fetch) >= _FUNDAMENTALS_REFRESH_SECONDS
-        if first_cycle_of_day or not self._estaticos_aplicados or stale:
-            self._fetch_fundamentals()
-            self._last_fundamentals_fetch = time.monotonic()
-            self._aplicar_estaticos()
-            self._estaticos_aplicados = True
+    def aplicar_pre_filtros(self):
+        self._fetch_fundamentals()
+        self._aplicar_estaticos()
         self._aplicar_dinamicos()
 
     def _aplicar_estaticos(self):
@@ -279,7 +270,6 @@ class SymbolPipeline:
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")
         self.cargar_todos()
-        self._estaticos_aplicados = False
 
     @property
     def todos(self) -> List[str]:

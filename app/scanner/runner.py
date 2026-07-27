@@ -74,9 +74,9 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
     logger.info("ScannerRunner: UNA_VEZ completed id=%d", escaner.idEscaner)
 
 
-def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, first_cycle_of_day: bool = False):
+def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
     logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
-    pipeline.aplicar_pre_filtros(first_cycle_of_day=first_cycle_of_day)
+    pipeline.aplicar_pre_filtros()
 
     if pipeline.tecnicos:
         grupos = agrupar_por_timeframe(pipeline.tecnicos)
@@ -121,9 +121,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     if last_date is not None:
                         pipeline.renovar_si_nuevo_dia()
                     last_date = now.date()
-                    _do_cycle(escaner, pipeline, first_cycle_of_day=True)
-                else:
-                    _do_cycle(escaner, pipeline)
+                _do_cycle(escaner, pipeline)
                 _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))
             else:
                 last_date = None

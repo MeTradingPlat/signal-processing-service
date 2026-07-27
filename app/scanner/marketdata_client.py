@@ -58,13 +58,24 @@ class MarketdataClient:
         except Exception:
             return False
 
-    def fundamentals_ready(self, sample_size: int = 20) -> bool:
+    # OTC is deliberately excluded: thin/no fundamental coverage there is
+    # normal even when marketdata's pipeline is fully healthy, so including
+    # it would make this check fail on data sparsity, not actual readiness.
+    _READY_SAMPLE_MERCADOS = ["NASDAQ", "NYSE", "AMEX", "ETF"]
+    _READY_THRESHOLD = 0.8
+
+    def fundamentals_ready(self, per_mercado_sample: int = 5) -> bool:
         try:
-            sample = self.fetch_symbols(["NASDAQ"])[:sample_size]
+            sample: List[str] = []
+            for mercado in self._READY_SAMPLE_MERCADOS:
+                sample.extend(self.fetch_symbols([mercado])[:per_mercado_sample])
             if not sample:
                 return False
             fundamentals = self.fetch_fundamentals(sample)
-            return any(f.marketCap is not None or f.prevClose is not None for f in fundamentals.values())
+            populated = sum(
+                1 for f in fundamentals.values() if f.marketCap is not None or f.prevClose is not None
+            )
+            return populated / len(sample) >= self._READY_THRESHOLD
         except Exception:
             return False
 

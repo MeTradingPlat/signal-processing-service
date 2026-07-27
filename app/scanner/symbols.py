@@ -183,7 +183,14 @@ class SymbolPipeline:
             return
         try:
             self._fundamentals = self._client.fetch_fundamentals(self._todos)
-            logger.info("SymbolPipeline: loaded fundamentals for %d symbols", len(self._fundamentals))
+            no_data = sum(
+                1 for f in self._fundamentals.values()
+                if f.marketCap is None and f.prevClose is None and f.shortInterest is None
+            )
+            logger.info(
+                "SymbolPipeline: loaded fundamentals for %d symbols (%d with no usable data from marketdata)",
+                len(self._fundamentals), no_data,
+            )
         except Exception as e:
             logger.error("SymbolPipeline: fundamentals fetch failed: %s", e)
 
@@ -247,6 +254,16 @@ class SymbolPipeline:
             except Exception as e:
                 logger.error("Failed to fetch candles for %s: %s", tf_label, e)
                 continue
+
+            total_bars = sum(len(bars) for bars in candles_map.values())
+            null_bars = sum(
+                1 for bars in candles_map.values() for c in bars
+                if c.open is None or c.high is None or c.low is None or c.close is None
+            )
+            logger.info(
+                "evaluar_tecnicos %s: %d symbols, %d/%d bars with a null OHLC field",
+                tf_label, len(candles_map), null_bars, total_bars,
+            )
 
             passing = set()
             for sym in candidates:

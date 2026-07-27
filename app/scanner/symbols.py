@@ -165,7 +165,6 @@ class SymbolPipeline:
         self._estaticos_aplicados = False
         self._client = MarketdataClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
-        self._candles: Dict[str, List[CandleResponse]] = {}
         self._last_fundamentals_fetch = 0.0
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
@@ -247,14 +246,13 @@ class SymbolPipeline:
         logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(quotes), len(self._filtrados))
 
     def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[Filtro]]:
-        from app.scanner.mappings import timeframe_to_marketdata
-
         candidates = set(self._filtrados)
+        matched: dict[str, list[Filtro]] = {sym: [] for sym in candidates}
+
         for minutos, filtros in grupos.items():
             if not candidates:
                 break
             tf_label = _minutos_to_label(minutos)
-            tf_marketdata = timeframe_to_marketdata(tf_label)
             try:
                 batch = list(candidates)[:200]
                 bars_needed = max(150, minutos * 2)
@@ -270,15 +268,13 @@ class SymbolPipeline:
                     continue
                 fund = self._fundamentals.get(sym)
                 data = _make_marketdata(sym, fund, candles, None)
-                if all(_get_strategy(f).evaluate(data) for f in filtros):
+                sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
+                if len(sym_matches) == len(filtros):
+                    matched[sym].extend(sym_matches)
                     passing.add(sym)
             candidates = passing
 
-        result = {}
-        for sym in candidates:
-            result[sym] = [f for f in self.tecnicos
-                          if _get_strategy(f).evaluate(_make_marketdata(sym, self._fundamentals.get(sym), self._candles.get(sym, []), None))]
-        return result
+        return {sym: matched[sym] for sym in candidates}
 
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")

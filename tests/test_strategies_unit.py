@@ -83,7 +83,8 @@ def _make_candles(prices: list[tuple[float, float, float, float, float]]):
     return candles
 
 
-# 14 candles with uptrend, clear OHLC
+# 15 candles with uptrend, clear OHLC (period-14 RSI needs period+1 closes to
+# actually compute instead of bailing out on insufficient data)
 BULLISH_CANDLES = _make_candles([
     (100, 102, 99, 101, 1000), (101, 103, 100, 102, 1200),
     (102, 105, 101, 104, 1500), (104, 106, 103, 105, 1300),
@@ -92,6 +93,7 @@ BULLISH_CANDLES = _make_candles([
     (111, 113, 110, 112, 1500), (112, 115, 111, 114, 1900),
     (114, 116, 113, 115, 2000), (115, 118, 114, 117, 2100),
     (117, 120, 116, 119, 2200), (119, 122, 118, 121, 2300),
+    (121, 124, 120, 123, 2400),
 ])
 
 ENGULFING_CANDLES = _make_candles([

@@ -1,22 +1,21 @@
 from app.models.enums import EnumParametro
 from app.strategies.base import FilterStrategy, MarketData
-from app.strategies.precio_movimiento import _calc_sma
 
 
 class BearishBullishEngulfingStrategy(FilterStrategy):
     """Bullish engulfing (close > prev open and open < prev close) or bearish engulfing."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
-            return 0.0
+            return None
         prev = data.candles[-2]
         curr = data.candles[-1]
+        if prev.open is None or prev.close is None or curr.open is None or curr.close is None:
+            return None
         tipo = self._param_str(EnumParametro.TIPO_PATRON_BEARISH_BULLISH_ENGULFING_CANDLE, "BULLISH")
-        o1, c1 = prev.open or 0.0, prev.close or 0.0
-        o2, c2 = curr.open or 0.0, curr.close or 0.0
-        if o2 < c1 and c2 > o1:
+        if curr.open < prev.close and curr.close > prev.open:
             return 1.0 if tipo == "BULLISH" else -1.0
-        if o2 > c1 and c2 < o1:
+        if curr.open > prev.close and curr.close < prev.open:
             return 1.0 if tipo == "BEARISH" else -1.0
         return 0.0
 
@@ -24,56 +23,61 @@ class BearishBullishEngulfingStrategy(FilterStrategy):
 class ConsecutiveCandlesStrategy(FilterStrategy):
     """N consecutive bullish or bearish candles."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         n = self._param_int(EnumParametro.NUMERO_VELAS_CONSECUTIVAS, 3)
         if not data.candles or len(data.candles) < n:
-            return 0.0
+            return None
         recent = data.candles[-n:]
-        bullish = all((c.close or 0.0) > (c.open or 0.0) for c in recent)
-        bearish = all((c.close or 0.0) < (c.open or 0.0) for c in recent)
+        if any(c.close is None or c.open is None for c in recent):
+            return None
+        bullish = all(c.close > c.open for c in recent)
+        bearish = all(c.close < c.open for c in recent)
         return 1.0 if bullish else (-1.0 if bearish else 0.0)
 
 
 class FirstCandleStrategy(FilterStrategy):
     """First candle of the day type (bullish/bearish)."""
 
-    def compute_value(self, data: MarketData) -> float:
-        if not data.candles or len(data.candles) < 1:
-            return 0.0
+    def compute_value(self, data: MarketData) -> float | None:
+        if not data.candles:
+            return None
         first = data.candles[0]
-        c = first.close or 0.0
-        o = first.open or 0.0
-        return 1.0 if c > o else (-1.0 if c < o else 0.0)
+        if first.close is None or first.open is None:
+            return None
+        return 1.0 if first.close > first.open else (-1.0 if first.close < first.open else 0.0)
 
 
 class HighLowOfDayStrategy(FilterStrategy):
     """Price near high/low of day."""
 
-    def compute_value(self, data: MarketData) -> float:
-        if not data.candles or len(data.candles) < 1:
-            return 50.0
-        all_highs = [c.high or 0.0 for c in data.candles]
-        all_lows = [c.low or float("inf") for c in data.candles]
-        day_high = max(all_highs)
-        day_low = min(all_lows)
+    def compute_value(self, data: MarketData) -> float | None:
+        if not data.candles:
+            return None
+        if any(c.high is None or c.low is None for c in data.candles) or data.candles[-1].close is None:
+            return None
+        day_high = max(c.high for c in data.candles)
+        day_low = min(c.low for c in data.candles)
         if day_high <= day_low:
             return 50.0
-        price = data.candles[-1].close or 0.0
+        price = data.candles[-1].close
         return ((price - day_low) / (day_high - day_low)) * 100.0
 
 
 class NewCandleHighLowStrategy(FilterStrategy):
     """New N-candle high or low."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
-            return 0.0
-        prev_high = max(c.high or 0.0 for c in data.candles[:-1])
-        prev_low = min(c.low or float("inf") for c in data.candles[:-1])
+            return None
+        prior = data.candles[:-1]
         curr = data.candles[-1]
-        if (curr.high or 0.0) > prev_high:
+        if any(c.high is None or c.low is None for c in prior) or curr.high is None or curr.low is None:
+            return None
+        prev_high = max(c.high for c in prior)
+        prev_low = min(c.low for c in prior)
+        if curr.high > prev_high:
             return 1.0
-        if (curr.low or float("inf")) < prev_low:
+        if curr.low < prev_low:
             return -1.0
         return 0.0
 
@@ -81,29 +85,34 @@ class NewCandleHighLowStrategy(FilterStrategy):
 class PercentagePullbackHighsLowsStrategy(FilterStrategy):
     """Percentage pullback from recent high/low."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 5:
-            return 0.0
+            return None
         recent = data.candles[-5:]
-        high = max(c.high or 0.0 for c in recent)
-        price = data.candles[-1].close or 0.0
+        if any(c.high is None for c in recent) or data.candles[-1].close is None:
+            return None
+        high = max(c.high for c in recent)
+        price = data.candles[-1].close
         if high <= 0:
-            return 0.0
+            return None
         return ((high - price) / high) * 100.0
 
 
 class BreakOverRecentHighsLowsStrategy(FilterStrategy):
     """Price breaking above/below recent N-bar range."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
-            return 0.0
-        prev_high = max(c.high or 0.0 for c in data.candles[:-1])
-        prev_low = min(c.low or float("inf") for c in data.candles[:-1])
+            return None
+        prior = data.candles[:-1]
         curr = data.candles[-1]
-        if (curr.close or 0.0) > prev_high:
+        if any(c.high is None or c.low is None for c in prior) or curr.close is None:
+            return None
+        prev_high = max(c.high for c in prior)
+        prev_low = min(c.low for c in prior)
+        if curr.close > prev_high:
             return 1.0
-        if (curr.close or 0.0) < prev_low:
+        if curr.close < prev_low:
             return -1.0
         return 0.0
 
@@ -111,13 +120,16 @@ class BreakOverRecentHighsLowsStrategy(FilterStrategy):
 class OpeningRangeBreakdownStrategy(FilterStrategy):
     """Price breaking below opening range."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
-            return 0.0
+            return None
         first = data.candles[0]
-        o_range_high = max(first.high or 0.0, first.open or 0.0, first.close or 0.0)
-        o_range_low = min(first.low or 0.0, first.open or 0.0, first.close or 0.0)
-        price = data.candles[-1].close or 0.0
+        if first.high is None or first.open is None or first.close is None or first.low is None:
+            return None
+        if data.candles[-1].close is None:
+            return None
+        o_range_low = min(first.low, first.open, first.close)
+        price = data.candles[-1].close
         if price < o_range_low and o_range_low > 0:
             return 1.0
         return 0.0
@@ -126,12 +138,16 @@ class OpeningRangeBreakdownStrategy(FilterStrategy):
 class OpeningRangeBreakoutStrategy(FilterStrategy):
     """Price breaking above opening range."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
-            return 0.0
+            return None
         first = data.candles[0]
-        o_range_high = max(first.high or 0.0, first.open or 0.0, first.close or 0.0)
-        price = data.candles[-1].close or 0.0
+        if first.high is None or first.open is None or first.close is None:
+            return None
+        if data.candles[-1].close is None:
+            return None
+        o_range_high = max(first.high, first.open, first.close)
+        price = data.candles[-1].close
         if price > o_range_high and o_range_high > 0:
             return 1.0
         return 0.0
@@ -140,12 +156,14 @@ class OpeningRangeBreakoutStrategy(FilterStrategy):
 class PivotsStrategy(FilterStrategy):
     """Price at pivot point (high or low surrounded by lower/higher)."""
 
-    def compute_value(self, data: MarketData) -> float:
+    def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 3:
-            return 0.0
+            return None
         recent = data.candles[-3:]
-        h1, h2, h3 = [c.high or 0.0 for c in recent]
-        l1, l2, l3 = [c.low or 0.0 for c in recent]
+        if any(c.high is None or c.low is None for c in recent):
+            return None
+        h1, h2, h3 = [c.high for c in recent]
+        l1, l2, l3 = [c.low for c in recent]
         if h2 > h1 and h2 > h3:
             return 1.0
         if l2 < l1 and l2 < l3:

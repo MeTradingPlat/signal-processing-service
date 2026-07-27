@@ -58,6 +58,16 @@ class MarketdataClient:
         except Exception:
             return False
 
+    def fundamentals_ready(self, sample_size: int = 20) -> bool:
+        try:
+            sample = self.fetch_symbols(["NASDAQ"])[:sample_size]
+            if not sample:
+                return False
+            fundamentals = self.fetch_fundamentals(sample)
+            return any(f.marketCap is not None or f.prevClose is not None for f in fundamentals.values())
+        except Exception:
+            return False
+
     def fetch_symbols(self, mercados: List[str]) -> List[str]:
         mics = [mercado_to_mic(m) for m in mercados]
         params = "&".join(f"markets={m}" for m in mics)
@@ -65,7 +75,7 @@ class MarketdataClient:
         return [s["symbol"] for s in data]
 
     def fetch_fundamentals(self, symbols: List[str]) -> dict[str, FundamentalResponse]:
-        data = self._request("POST", "/marketdata/fundamentals/realtime", body=symbols)
+        data = self._request("POST", "/marketdata/fundamentals/realtime", body=symbols, timeout=90)
         return {k: FundamentalResponse(**v) for k, v in data.items()}
 
     def fetch_candles(

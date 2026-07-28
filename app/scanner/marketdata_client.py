@@ -89,14 +89,25 @@ class MarketdataClient:
         data = self._request("POST", "/marketdata/fundamentals/realtime", body=symbols, timeout=90)
         return {k: FundamentalResponse(**v) for k, v in data.items()}
 
+    # marketdata-service reliably serves up to 8 channels x 100 symbols/channel
+    # (800) in a single pass (~15s); larger requests still work correctly there
+    # via internal sequential waves, but each wave adds ~15s, so we chunk here
+    # to keep every individual HTTP call fast and comfortably under our own
+    # 90s timeout instead of relying on marketdata-service's waves for that.
+    _CANDLE_CHUNK_SIZE = 800
+
     def fetch_candles(
         self, symbols: List[str], timeframe: str, bars: int
     ) -> dict[str, List[CandleResponse]]:
         tf = timeframe_to_marketdata(timeframe)
-        data = self._request("POST", "/marketdata/historical/batch",
-                             body={"symbols": symbols, "timeframe": tf, "bars": bars}, timeout=90)
-        raw = data.get("candlesPorSimbolo", {})
-        return {k: [CandleResponse(**c) for c in v] for k, v in raw.items()}
+        result: dict[str, List[CandleResponse]] = {}
+        for i in range(0, len(symbols), self._CANDLE_CHUNK_SIZE):
+            chunk = symbols[i:i + self._CANDLE_CHUNK_SIZE]
+            data = self._request("POST", "/marketdata/historical/batch",
+                                 body={"symbols": chunk, "timeframe": tf, "bars": bars}, timeout=90)
+            raw = data.get("candlesPorSimbolo", {})
+            result.update({k: [CandleResponse(**c) for c in v] for k, v in raw.items()})
+        return result
 
     def fetch_candles_current(
         self, symbols: List[str], timeframe: str

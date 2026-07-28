@@ -248,7 +248,7 @@ class SymbolPipeline:
                 break
             tf_label = _minutos_to_label(minutos)
             try:
-                batch = list(candidates)[:200]
+                batch = list(candidates)
                 bars_needed = max(150, minutos * 2)
                 candles_map = self._client.fetch_candles(batch, tf_label, bars=bars_needed)
             except Exception as e:

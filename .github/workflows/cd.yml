@@ -44,7 +44,7 @@ jobs:
             --label project="metradingplat" \
             --label service="signal-processing-service" \
             -e SP_SCANNER_MANAGEMENT_URL="http://scanner-management-service:8081" \
-            -e SP_MARKETDATA_URL="http://gateway:8080" \
+            -e SP_MARKETDATA_URL="http://marketdata-service:8082" \
             -e SP_KAFKA_BOOTSTRAP_SERVERS="kafka:29092" \
             -e SP_KAFKA_GROUP_ID="signal-processing-group" \
             -e SP_MAX_WORKERS_POOL="2" \

@@ -1,6 +1,5 @@
 import json
 import logging
-import urllib.error
 import urllib.request
 from typing import List, Optional
 
@@ -15,54 +14,24 @@ logger = logging.getLogger(__name__)
 
 
 class MarketdataClient:
+    # Calls marketdata-service directly over the Docker network instead of
+    # through the gateway -- marketdata-service's own security only requires
+    # X-Gateway-Passed for /marketdata/**, no JWT (confirmed in
+    # SecurityConfiguration: that path falls under anyRequest().permitAll(),
+    # and both its Jwt/ApiKey filters are no-ops when their header is
+    # absent). Going direct removes the login/24h-token-refresh dance
+    # entirely, along with the extra hop through the gateway.
     def __init__(self):
         self._base = settings.marketdata_url
-        self._token: Optional[str] = None
-
-    def _auth(self):
-        if self._token:
-            return
-        data = json.dumps({
-            "username": settings.marketdata_user,
-            "password": settings.marketdata_password,
-        }).encode()
-        req = urllib.request.Request(
-            f"{self._base}/auth/login",
-            data=data,
-            headers={"Content-Type": "application/json", "X-Gateway-Passed": "true"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            self._token = json.loads(resp.read())["token"]
-        logger.info("Marketdata auth OK via gateway")
 
     def _headers(self) -> dict:
-        return {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._token}",
-            "X-Gateway-Passed": "true",
-        }
+        return {"Content-Type": "application/json", "X-Gateway-Passed": "true"}
 
-    # Tokens JWT duran 24h. Los escaneres recurrentes corren en el mismo
-    # proceso/instancia por dias sin recrear el cliente, asi que sin este
-    # reintento, el token vencia una vez y todas las peticiones quedaban
-    # fallando en 401 para siempre -- el escaner seguia "corriendo" pero
-    # dejaba de encontrar candidatos, sin ningun error visible.
     def _request(self, method: str, path: str, body: Optional[dict] = None, timeout: int = 30) -> dict:
-        self._auth()
         data = json.dumps(body).encode() if body else None
-        for attempt in (1, 2):
-            req = urllib.request.Request(f"{self._base}{path}", data=data, headers=self._headers(), method=method)
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    return json.loads(resp.read())
-            except urllib.error.HTTPError as e:
-                if e.code == 401 and attempt == 1:
-                    logger.warning("Marketdata token expired/invalid, re-authenticating")
-                    self._token = None
-                    self._auth()
-                    continue
-                raise
+        req = urllib.request.Request(f"{self._base}{path}", data=data, headers=self._headers(), method=method)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
 
     def is_ready(self) -> bool:
         try:

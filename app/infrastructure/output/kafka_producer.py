@@ -33,12 +33,22 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     producer = _get_producer()
     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-    clear_event = {
-        "type": "CLEAR_SCANNER_SIGNALS",
-        "servicioOrigen": settings.servicio_origen,
-        "idEscaner": scanner_id,
-        "timestamp": now,
-    }
+    # El clear se manda siempre, incluso con signals vacio -- antes estaba
+    # dentro del for de abajo, asi que un ciclo sin ningun candidato (0
+    # signals) nunca lo disparaba, y los simbolos del ciclo anterior se
+    # quedaban pegados para siempre en asset-management-service (nunca se
+    # marcan como ya no vigentes, solo se upsertan/insertan nuevos).
+    if producer and producer is not False:
+        clear_event = {
+            "type": "CLEAR_SCANNER_SIGNALS",
+            "servicioOrigen": settings.servicio_origen,
+            "idEscaner": scanner_id,
+            "timestamp": now,
+        }
+        try:
+            producer.send("signals", key=str(scanner_id), value=clear_event)
+        except Exception as e:
+            logger.error("Failed to publish clear event for scanner %d: %s", scanner_id, e)
 
     signal_count = 0
     for symbol, passed_filters in signals.items():
@@ -55,9 +65,6 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
         }
         try:
             if producer and producer is not False:
-                if clear_event is not None:
-                    producer.send("signals", key=str(scanner_id), value=clear_event)
-                    clear_event = None
                 producer.send("signals", key=symbol, value=signal_event)
             signal_count += 1
             logger.debug("SIGNAL: scanner='%s' symbol=%s filters=%s", scanner_name, symbol, filtros_nombres)
@@ -67,8 +74,7 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     if producer and producer is not False:
         producer.flush()
 
-    if signal_count > 0 and producer and producer is not False:
-        logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
+    logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
 
 
 def publish_scanner_state(scanner_id: int, estado_nuevo: str, razon: str):

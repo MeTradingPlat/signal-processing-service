@@ -81,8 +81,12 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
     if pipeline.tecnicos:
         grupos = agrupar_por_timeframe(pipeline.tecnicos)
         signals = pipeline.evaluar_tecnicos(grupos)
+        # Se publica siempre, incluso vacio: es lo que dispara el clear del
+        # ciclo anterior en asset-management-service (ver kafka_producer.py).
+        # Sin esto, un ciclo con 0 candidatos deja pegados para siempre los
+        # simbolos del ciclo anterior.
+        _publish_signals(escaner, signals)
         if signals:
-            _publish_signals(escaner, signals)
             logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
                         escaner.idEscaner, len(signals), list(signals.keys())[:5])
 

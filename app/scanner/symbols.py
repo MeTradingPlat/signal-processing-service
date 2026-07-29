@@ -130,9 +130,14 @@ _FILTRO_CATEGORY_FALLBACK: dict[EnumFiltro, EnumCategoriaFiltro] = {
     EnumFiltro.RANGE_DOLLARS: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.CROSSING_ABOVE_BELOW: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.HALT: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
-    EnumFiltro.DISTANCE_FROM_VWAP: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
-    EnumFiltro.DISTANCE_FROM_EMA: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
-    EnumFiltro.DISTANCE_FROM_MA: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
+    # DISTANCE_FROM_VWAP/EMA/MA NO van aca: sus estrategias necesitan velas
+    # (calculan VWAP/EMA/SMA), pero la etapa dinamica solo construye
+    # MarketData con quote (candles=None siempre) -- listarlos como
+    # PRECIO_Y_MOVIMIENTO hacia que compute_value devolviera None SIEMPRE,
+    # y como se exige que todos los dinamicos pasen a la vez, ningun simbolo
+    # podia pasar nunca (confirmado en vivo: "6149 -> 0" en cada ciclo, sin
+    # excepcion, para un escaner con DISTANCE_FROM_VWAP). Sin entrada aca
+    # caen por defecto en tecnicos, donde si se les pasan velas reales.
 }
 
 

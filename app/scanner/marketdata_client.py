@@ -1,5 +1,6 @@
 import json
 import logging
+import urllib.error
 import urllib.request
 from typing import List, Optional
 
@@ -35,21 +36,33 @@ class MarketdataClient:
             self._token = json.loads(resp.read())["token"]
         logger.info("Marketdata auth OK via gateway")
 
+    def _headers(self) -> dict:
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._token}",
+            "X-Gateway-Passed": "true",
+        }
+
+    # Tokens JWT duran 24h. Los escaneres recurrentes corren en el mismo
+    # proceso/instancia por dias sin recrear el cliente, asi que sin este
+    # reintento, el token vencia una vez y todas las peticiones quedaban
+    # fallando en 401 para siempre -- el escaner seguia "corriendo" pero
+    # dejaba de encontrar candidatos, sin ningun error visible.
     def _request(self, method: str, path: str, body: Optional[dict] = None, timeout: int = 30) -> dict:
         self._auth()
         data = json.dumps(body).encode() if body else None
-        req = urllib.request.Request(
-            f"{self._base}{path}",
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._token}",
-                "X-Gateway-Passed": "true",
-            },
-            method=method,
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read())
+        for attempt in (1, 2):
+            req = urllib.request.Request(f"{self._base}{path}", data=data, headers=self._headers(), method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                if e.code == 401 and attempt == 1:
+                    logger.warning("Marketdata token expired/invalid, re-authenticating")
+                    self._token = None
+                    self._auth()
+                    continue
+                raise
 
     def is_ready(self) -> bool:
         try:

@@ -128,6 +128,11 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                 _do_cycle(escaner, pipeline)
                 _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))
             else:
+                if last_date is not None:
+                    # La ventana recien cerro -- limpiar ahora en vez de
+                    # dejar el ultimo resultado de la sesion mostrandose como
+                    # "ACTIVO" toda la noche hasta el primer ciclo de manana.
+                    _publish_signals(escaner, {})
                 last_date = None
                 next_run = next_trading_window(escaner.horaInicio, now)
                 wait = (next_run - now).total_seconds()

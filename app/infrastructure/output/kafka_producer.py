@@ -33,42 +33,14 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     producer = _get_producer()
     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-    # El clear se manda siempre, incluso con signals vacio -- antes estaba
-    # dentro del for de abajo, asi que un ciclo sin ningun candidato (0
-    # signals) nunca lo disparaba, y los simbolos del ciclo anterior se
-    # quedaban pegados para siempre en asset-management-service (nunca se
-    # marcan como ya no vigentes, solo se upsertan/insertan nuevos).
-    if producer and producer is not False:
-        clear_event = {
-            "type": "CLEAR_SCANNER_SIGNALS",
-            "servicioOrigen": settings.servicio_origen,
-            "idEscaner": scanner_id,
-            "timestamp": now,
-        }
-        try:
-            producer.send("signals", key=str(scanner_id), value=clear_event)
-        except Exception as e:
-            logger.error("Failed to publish clear event for scanner %d: %s", scanner_id, e)
-
+    # El tab "Señales" del frontend lee de log-service (categoria=SIGNAL) --
+    # es un log historico append-only, a diferencia del extinto topico
+    # "signals" (estado actual, se limpiaba cada ciclo) que solo alimentaba
+    # la pestaña "Activos" ya eliminada junto con asset-management-service.
     signal_count = 0
     for symbol, passed_filters in signals.items():
         filtros_json = json.dumps([f.enumFiltro.name for f in passed_filters])
         filtros_nombres = ", ".join([f.enumFiltro.name for f in passed_filters])
-        signal_event = {
-            "idEscaner": scanner_id,
-            "nombreEscaner": scanner_name,
-            "symbol": symbol,
-            "tipoSenal": "SCANNER_SIGNAL",
-            "filtrosAplicados": filtros_json,
-            "timestamp": now,
-            "servicioOrigen": settings.servicio_origen,
-        }
-        # El tab "Señales" del frontend lee de log-service (categoria=SIGNAL),
-        # no del topico "signals" -- sin esto nunca llegaba nada ahi pese a
-        # que "Activos" (que si lee de "signals") funcionaba bien. A
-        # diferencia de "signals" (estado actual, se limpia cada ciclo via
-        # CLEAR_SCANNER_SIGNALS), este es un log historico append-only, por
-        # eso no se manda el clear aca.
         log_event = {
             "servicioOrigen": settings.servicio_origen,
             "nivel": "INFO",
@@ -81,7 +53,6 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
         }
         try:
             if producer and producer is not False:
-                producer.send("signals", key=symbol, value=signal_event)
                 producer.send("logs", key=symbol, value=log_event)
             signal_count += 1
             logger.debug("SIGNAL: scanner='%s' symbol=%s filters=%s", scanner_name, symbol, filtros_nombres)

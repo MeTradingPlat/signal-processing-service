@@ -63,9 +63,26 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
             "timestamp": now,
             "servicioOrigen": settings.servicio_origen,
         }
+        # El tab "Señales" del frontend lee de log-service (categoria=SIGNAL),
+        # no del topico "signals" -- sin esto nunca llegaba nada ahi pese a
+        # que "Activos" (que si lee de "signals") funcionaba bien. A
+        # diferencia de "signals" (estado actual, se limpia cada ciclo via
+        # CLEAR_SCANNER_SIGNALS), este es un log historico append-only, por
+        # eso no se manda el clear aca.
+        log_event = {
+            "servicioOrigen": settings.servicio_origen,
+            "nivel": "INFO",
+            "mensaje": f"Señal generada para {symbol} en '{scanner_name}': cumple {filtros_nombres}",
+            "idEscaner": scanner_id,
+            "symbol": symbol,
+            "categoria": "SIGNAL",
+            "timestamp": now,
+            "metadatos": filtros_json,
+        }
         try:
             if producer and producer is not False:
                 producer.send("signals", key=symbol, value=signal_event)
+                producer.send("logs", key=symbol, value=log_event)
             signal_count += 1
             logger.debug("SIGNAL: scanner='%s' symbol=%s filters=%s", scanner_name, symbol, filtros_nombres)
         except Exception as e:

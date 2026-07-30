@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     reintentos_rest: int = 3
     servicio_origen: str = "signal-processing-service"
     log_service_url: str = "http://log-service:8084"
-    asset_management_url: str = "http://asset-management-service:8083"
     log_level: str = "INFO"
     http_host: str = "0.0.0.0"
 

@@ -53,10 +53,6 @@ class ScannerManagementClient:
             self._cleanup_endpoint(settings.log_service_url, f"/logs/escaner/{scanner_id}")
         except Exception as e:
             logger.warning("Failed to cleanup logs for scanner %d: %s", scanner_id, e)
-        try:
-            self._cleanup_endpoint(settings.asset_management_url, f"/activos/escaner/{scanner_id}")
-        except Exception as e:
-            logger.warning("Failed to cleanup assets for scanner %d: %s", scanner_id, e)
 
     def _cleanup_endpoint(self, base_url: str, path: str):
         req = urllib.request.Request(

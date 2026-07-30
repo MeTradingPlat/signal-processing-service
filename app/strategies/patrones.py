@@ -1,9 +1,25 @@
 from app.models.enums import EnumParametro
+from app.scanner.marketdata_models import CandleResponse
 from app.strategies.base import FilterStrategy, MarketData
 
 
+def _todays_candles(candles: list[CandleResponse] | None) -> list[CandleResponse]:
+    """Isola las velas de la sesion de hoy -- varias estrategias de patrones
+    usaban candles[0]/candles[-1] asumiendo que la ventana pedida arrancaba
+    en la apertura del dia, pero es solo "las ultimas N barras", que puede
+    arrancar en cualquier punto (incluso un dia anterior)."""
+    if not candles:
+        return []
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date()
+    return [c for c in candles if c.timestamp and c.timestamp.date() == today]
+
+
 class BearishBullishEngulfingStrategy(FilterStrategy):
-    """Bullish engulfing (close > prev open and open < prev close) or bearish engulfing."""
+    """Bullish engulfing: vela previa bajista, vela actual alcista, y el
+    cuerpo de la actual envuelve por completo el de la previa (definicion
+    estandar -- confirmar solo el rango sin exigir el color de cada vela
+    dejaba pasar falsos positivos tipo harami, vela interior)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
@@ -13,9 +29,19 @@ class BearishBullishEngulfingStrategy(FilterStrategy):
         if prev.open is None or prev.close is None or curr.open is None or curr.close is None:
             return None
         tipo = self._param_str(EnumParametro.TIPO_PATRON_BEARISH_BULLISH_ENGULFING_CANDLE, "BULLISH")
-        if curr.open < prev.close and curr.close > prev.open:
+        prev_bearish = prev.close < prev.open
+        prev_bullish = prev.close > prev.open
+        curr_bullish = curr.close > curr.open
+        curr_bearish = curr.close < curr.open
+        bullish_engulfing = (
+            prev_bearish and curr_bullish and curr.open < prev.close and curr.close > prev.open
+        )
+        bearish_engulfing = (
+            prev_bullish and curr_bearish and curr.open > prev.close and curr.close < prev.open
+        )
+        if bullish_engulfing:
             return 1.0 if tipo == "BULLISH" else -1.0
-        if curr.open > prev.close and curr.close < prev.open:
+        if bearish_engulfing:
             return 1.0 if tipo == "BEARISH" else -1.0
         return 0.0
 
@@ -39,9 +65,10 @@ class FirstCandleStrategy(FilterStrategy):
     """First candle of the day type (bullish/bearish)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles:
+        todays = _todays_candles(data.candles)
+        if not todays:
             return None
-        first = data.candles[0]
+        first = todays[0]
         if first.close is None or first.open is None:
             return None
         return 1.0 if first.close > first.open else (-1.0 if first.close < first.open else 0.0)
@@ -118,39 +145,37 @@ class BreakOverRecentHighsLowsStrategy(FilterStrategy):
 
 
 class OpeningRangeBreakdownStrategy(FilterStrategy):
-    """Price breaking below opening range."""
+    """Price closing below the low of the opening range candle -- la primera
+    vela de HOY en la temporalidad configurada (ej. M15 = rango de los
+    primeros 15 minutos), definicion estandar de Opening Range Breakout.
+    Antes usaba candles[0] de la ventana pedida, que no necesariamente
+    arrancaba en la apertura del dia (podia ser de ayer)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or len(data.candles) < 2:
+        todays = _todays_candles(data.candles)
+        if not todays:
             return None
-        first = data.candles[0]
-        if first.high is None or first.open is None or first.close is None or first.low is None:
+        first = todays[0]
+        if first.low is None or todays[-1].close is None:
             return None
-        if data.candles[-1].close is None:
-            return None
-        o_range_low = min(first.low, first.open, first.close)
-        price = data.candles[-1].close
-        if price < o_range_low and o_range_low > 0:
-            return 1.0
-        return 0.0
+        price = todays[-1].close
+        return 1.0 if price < first.low and first.low > 0 else 0.0
 
 
 class OpeningRangeBreakoutStrategy(FilterStrategy):
-    """Price breaking above opening range."""
+    """Price closing above the high of the opening range candle -- la primera
+    vela de HOY en la temporalidad configurada. Mismo fix que
+    OpeningRangeBreakdownStrategy."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or len(data.candles) < 2:
+        todays = _todays_candles(data.candles)
+        if not todays:
             return None
-        first = data.candles[0]
-        if first.high is None or first.open is None or first.close is None:
+        first = todays[0]
+        if first.high is None or todays[-1].close is None:
             return None
-        if data.candles[-1].close is None:
-            return None
-        o_range_high = max(first.high, first.open, first.close)
-        price = data.candles[-1].close
-        if price > o_range_high and o_range_high > 0:
-            return 1.0
-        return 0.0
+        price = todays[-1].close
+        return 1.0 if price > first.high and first.high > 0 else 0.0
 
 
 class PivotsStrategy(FilterStrategy):
@@ -172,11 +197,14 @@ class PivotsStrategy(FilterStrategy):
 
 
 class MinutosInMarketStrategy(FilterStrategy):
-    """Minutes since market open."""
+    """Minutes since market open (9:30am ET)."""
 
     def compute_value(self, data: MarketData) -> float:
         from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
-        minutes = now.hour * 60 + now.minute
+        from zoneinfo import ZoneInfo
+        # Comparaba la hora en UTC directo contra "9:30" como si tambien
+        # fuera UTC -- desfasaba 4-5 horas (EDT/EST) contra la apertura real.
+        now_et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
+        minutes = now_et.hour * 60 + now_et.minute
         market_open = 9 * 60 + 30
         return float(max(0, minutes - market_open))

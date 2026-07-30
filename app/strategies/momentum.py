@@ -55,7 +55,12 @@ class DistanceFromMAStrategy(FilterStrategy):
 
 
 class BackToEMAAlertStrategy(FilterStrategy):
-    """Price pulling back to EMA."""
+    """Price pulling back TOWARD the EMA -- estaba mas lejos la vela
+    anterior, ahora mas cerca (definicion estandar de "EMA pullback": el
+    precio se retracta hacia la media tras alejarse). Antes solo calculaba
+    la distancia actual (identico a DistanceFromEMA), sin comparar la
+    trayectoria, asi que nunca confirmaba que de verdad se estuviera
+    acercando -- devuelve 0.0 cuando no se acerca."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 3 or any(c.close is None for c in data.candles):
@@ -65,7 +70,11 @@ class BackToEMAAlertStrategy(FilterStrategy):
         ema = _calc_ema(closes, periodo)
         if ema <= 0:
             return None
-        return ((closes[-1] / ema) - 1.0) * 100.0
+        prev_distance = ((closes[-2] / ema) - 1.0) * 100.0
+        curr_distance = ((closes[-1] / ema) - 1.0) * 100.0
+        if abs(curr_distance) >= abs(prev_distance):
+            return 0.0
+        return curr_distance
 
 
 class ThroughEMAVWAPAlertStrategy(FilterStrategy):

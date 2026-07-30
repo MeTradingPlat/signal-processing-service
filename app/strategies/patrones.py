@@ -78,15 +78,16 @@ class HighLowOfDayStrategy(FilterStrategy):
     """Price near high/low of day."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles:
+        todays = _todays_candles(data.candles)
+        if not todays:
             return None
-        if any(c.high is None or c.low is None for c in data.candles) or data.candles[-1].close is None:
+        if any(c.high is None or c.low is None for c in todays) or todays[-1].close is None:
             return None
-        day_high = max(c.high for c in data.candles)
-        day_low = min(c.low for c in data.candles)
+        day_high = max(c.high for c in todays)
+        day_low = min(c.low for c in todays)
         if day_high <= day_low:
             return 50.0
-        price = data.candles[-1].close
+        price = todays[-1].close
         return ((price - day_low) / (day_high - day_low)) * 100.0
 
 

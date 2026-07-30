@@ -14,44 +14,38 @@ class RSIStrategy(FilterStrategy):
 
 
 class DistanceFromVWAPStrategy(FilterStrategy):
-    """Distance from VWAP in %."""
+    """Distance from VWAP/EMA/MA in % -- LINEA_REFERENCIA elige la linea
+    (antes se ignoraba: scanner-management-service solo tiene UNA fabrica
+    para esta familia de filtros, siempre con enumFiltro=DISTANCE_FROM_VWAP
+    sin importar que el usuario elija VWAP/EMA/MA en el dropdown, asi que
+    DistanceFromEMAStrategy/DistanceFromMAStrategy nunca se llegaban a
+    invocar en la practica -- unificadas aca para que la seleccion real del
+    usuario si tenga efecto)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or data.candles[-1].close is None:
             return None
-        vwap = _calc_vwap(data.candles)
-        if vwap is None or vwap <= 0:
-            return None
+        linea = self._param_str(EnumParametro.LINEA_REFERENCIA_DISTANCE_FROM_VWAP_EMA_MA, "VWAP")
         price = data.candles[-1].close
-        return ((price / vwap) - 1.0) * 100.0
-
-
-class DistanceFromEMAStrategy(FilterStrategy):
-    """Distance from EMA in %."""
-
-    def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or any(c.close is None for c in data.candles):
+        if linea == "VWAP":
+            ref = _calc_vwap(data.candles)
+        else:
+            if any(c.close is None for c in data.candles):
+                return None
+            closes = [c.close for c in data.candles]
+            default_periodo = 9 if linea == "EMA" else 20
+            periodo = self._param_int(EnumParametro.PERIODO_LINEA_DISTANCE_FROM_VWAP_EMA_MA, default_periodo)
+            ref = _calc_ema(closes, periodo) if linea == "EMA" else _calc_sma(closes, periodo)
+        if ref is None or ref <= 0:
             return None
-        periodo = self._param_int(EnumParametro.PERIODO_LINEA_DISTANCE_FROM_VWAP_EMA_MA, 9)
-        closes = [c.close for c in data.candles]
-        ema = _calc_ema(closes, periodo)
-        if ema <= 0:
-            return None
-        return ((closes[-1] / ema) - 1.0) * 100.0
+        return ((price / ref) - 1.0) * 100.0
 
 
-class DistanceFromMAStrategy(FilterStrategy):
-    """Distance from SMA in %."""
-
-    def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or any(c.close is None for c in data.candles):
-            return None
-        periodo = self._param_int(EnumParametro.PERIODO_LINEA_DISTANCE_FROM_VWAP_EMA_MA, 20)
-        closes = [c.close for c in data.candles]
-        sma = _calc_sma(closes, periodo)
-        if sma <= 0:
-            return None
-        return ((closes[-1] / sma) - 1.0) * 100.0
+# DISTANCE_FROM_EMA/DISTANCE_FROM_MA nunca se producen hoy desde
+# scanner-management-service (ver docstring arriba), pero se mapean a la
+# misma estrategia por si alguna vez se emiten directamente.
+DistanceFromEMAStrategy = DistanceFromVWAPStrategy
+DistanceFromMAStrategy = DistanceFromVWAPStrategy
 
 
 class BackToEMAAlertStrategy(FilterStrategy):
@@ -113,8 +107,11 @@ class EMAVWAPSupportResistanceStrategy(FilterStrategy):
     MISMO lado (no la cruza) y luego se aleja de nuevo. Con solo 2 velas
     (lo que habia antes, la resta de distancias absolutas) no se puede
     distinguir un rebote real de simplemente estar alejandose por primera
-    vez -- hacen falta 3 puntos: lejos, cerca, lejos otra vez. Devuelve 0.0
-    cuando no hay rebote confirmado en esta vela."""
+    vez -- hacen falta 3 puntos: lejos, cerca, lejos otra vez. TIPO_ROL elige
+    si la linea debe actuar como SOPORTE (precio arriba, rebota hacia
+    arriba) o RESISTENCIA (precio abajo, rebota hacia abajo) -- antes se
+    ignoraba y aceptaba un rebote de cualquiera de los dos lados. Devuelve
+    0.0 cuando no hay rebote confirmado en esta vela."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 3 or any(c.close is None for c in data.candles):
@@ -140,7 +137,11 @@ class EMAVWAPSupportResistanceStrategy(FilterStrategy):
         d1 = (closes[-3] / ref1 - 1.0) * 100.0
         d2 = (closes[-2] / ref2 - 1.0) * 100.0
         d3 = (closes[-1] / ref3 - 1.0) * 100.0
-        same_side = (d1 > 0 and d2 > 0 and d3 > 0) or (d1 < 0 and d2 < 0 and d3 < 0)
+        rol = self._param_str(EnumParametro.TIPO_ROL_EMA_VWAP_SUPPORT, "SOPORTE")
+        if rol == "RESISTENCIA":
+            same_side = d1 < 0 and d2 < 0 and d3 < 0
+        else:
+            same_side = d1 > 0 and d2 > 0 and d3 > 0
         approached_then_retreated = abs(d2) < abs(d1) and abs(d3) > abs(d2)
         if not (same_side and approached_then_retreated):
             return 0.0

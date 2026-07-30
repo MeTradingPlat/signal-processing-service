@@ -1,6 +1,7 @@
 from app.models.enums import EnumParametro
 from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
 from app.strategies.base import FilterStrategy, MarketData
+from app.strategies.patrones import _todays_candles
 
 
 class PrecioStrategy(FilterStrategy):
@@ -108,30 +109,51 @@ class RangeDollarsStrategy(FilterStrategy):
 
 
 class CrossingAboveBelowStrategy(FilterStrategy):
-    """Price actually crossing above/below the EMA this bar -- el cierre
-    previo estaba a un lado de la EMA y el actual quedo del otro. Mismo bug
-    que ThroughEMAVWAPAlertStrategy (momentum.py): solo calculaba la
-    distancia actual, identico a estar simplemente cerca de la linea, sin
-    comparar contra la vela anterior para confirmar un cruce real."""
+    """Price actually crossing above/below a reference level this bar -- el
+    cierre previo estaba a un lado del nivel y el actual quedo del otro.
+    NIVEL_CRUCE elige el nivel (antes se ignoraba y siempre usaba EMA):
+    OPEN = apertura de hoy, CLOSE = cierre del dia anterior, VWAP, o EMA
+    (default). Mismo bug que ThroughEMAVWAPAlertStrategy (momentum.py): solo
+    calculaba la distancia actual, identico a estar simplemente cerca de la
+    linea, sin comparar contra la vela anterior para confirmar un cruce
+    real."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
             return None
-        periodo = self._param_int(EnumParametro.PERIODO_EMA_CROSSING_ABOVE_BELOW, 9)
-        candles_needed = min(len(data.candles), periodo + 1)
-        recent = data.candles[-candles_needed:]
-        if any(c.close is None for c in recent):
-            return None
-        closes = [c.close for c in recent]
-        ema = _calc_ema(closes, periodo)
-        if ema <= 0:
+        nivel = self._param_str(EnumParametro.NIVEL_CRUCE_CROSSING_ABOVE_BELOW, "EMA")
+        if nivel == "VWAP":
+            ref = _calc_vwap(data.candles)
+            closes = [c.close for c in data.candles[-2:]]
+            if any(c is None for c in closes):
+                return None
+        elif nivel == "OPEN":
+            todays = _todays_candles(data.candles)
+            ref = todays[0].open if todays else None
+            closes = [c.close for c in data.candles[-2:]]
+            if any(c is None for c in closes):
+                return None
+        elif nivel == "CLOSE":
+            ref = data.fundamental.prevClose if data.fundamental else None
+            closes = [c.close for c in data.candles[-2:]]
+            if any(c is None for c in closes):
+                return None
+        else:
+            periodo = self._param_int(EnumParametro.PERIODO_EMA_CROSSING_ABOVE_BELOW, 9)
+            candles_needed = min(len(data.candles), periodo + 1)
+            recent = data.candles[-candles_needed:]
+            if any(c.close is None for c in recent):
+                return None
+            closes = [c.close for c in recent]
+            ref = _calc_ema(closes, periodo)
+        if ref is None or ref <= 0:
             return None
         prev_close, curr_close = closes[-2], closes[-1]
-        crossed_up = prev_close <= ema < curr_close
-        crossed_down = prev_close >= ema > curr_close
+        crossed_up = prev_close <= ref < curr_close
+        crossed_down = prev_close >= ref > curr_close
         if not (crossed_up or crossed_down):
             return 0.0
-        return ((curr_close / ema) - 1.0) * 100.0
+        return ((curr_close / ref) - 1.0) * 100.0
 
 
 class HaltStrategy(FilterStrategy):
@@ -165,19 +187,35 @@ def _calc_sma(values: list[float], period: int) -> float:
     return sum(values[-period:]) / period if period > 0 else 0.0
 
 
-def _calc_atr(candles: list[CandleResponse], period: int) -> float | None:
-    """Wilder's ATR: initial SMA then smoothed (Prior ATR * (N-1) + TR) / N"""
+def _calc_atr(candles: list[CandleResponse], period: int, modo: str = "RMA") -> float | None:
+    """True Range series suavizada segun el modo elegido -- antes siempre
+    aplicaba Wilder's (RMA), ignorando MODO_PROMEDIO_MOVIL_ATR(P). RMA sigue
+    siendo el default (el metodo clasico de ATR)."""
     if len(candles) < 2:
         return None
     tr_values = []
+    volumes = []
     for i in range(1, len(candles)):
         c = candles[i]
         prev = candles[i - 1]
         if c.high is None or c.low is None or prev.close is None:
             return None
         tr_values.append(max(c.high - c.low, abs(c.high - prev.close), abs(c.low - prev.close)))
+        volumes.append(c.volume or 0)
     if not tr_values:
         return None
+    if modo == "EMA":
+        return _calc_ema(tr_values, period)
+    if modo == "SMA":
+        return _calc_sma(tr_values, period)
+    if modo == "VMA":
+        window_tr = tr_values[-period:] if len(tr_values) > period else tr_values
+        window_vol = volumes[-period:] if len(volumes) > period else volumes
+        total_vol = sum(window_vol)
+        if total_vol <= 0:
+            return _calc_sma(tr_values, period)
+        return sum(t * v for t, v in zip(window_tr, window_vol)) / total_vol
+    # RMA (Wilder's): initial SMA then smoothed (Prior ATR * (N-1) + TR) / N
     if len(tr_values) <= period:
         return sum(tr_values) / len(tr_values)
     atr = sum(tr_values[:period]) / period

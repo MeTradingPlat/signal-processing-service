@@ -78,7 +78,11 @@ class FirstCandleStrategy(FilterStrategy):
 
 
 class HighLowOfDayStrategy(FilterStrategy):
-    """Price near high/low of day."""
+    """Distance (%) from today's high or low -- OPCION_EXTREMO elige cual
+    extremo (antes se ignoraba y siempre devolvia la posicion 0-100% en el
+    rango, sin importar la seleccion): HIGH = que tan cerca del maximo del
+    dia (0% = en el maximo), LOW = que tan cerca del minimo (0% = en el
+    minimo)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         todays = _todays_candles(data.candles)
@@ -89,13 +93,18 @@ class HighLowOfDayStrategy(FilterStrategy):
         day_high = max(c.high for c in todays)
         day_low = min(c.low for c in todays)
         if day_high <= day_low:
-            return 50.0
+            return 0.0
         price = todays[-1].close
-        return ((price - day_low) / (day_high - day_low)) * 100.0
+        opcion = self._param_str(EnumParametro.OPCION_EXTREMO_HIGH_LOW_DAY, "HIGH")
+        if opcion == "LOW":
+            return ((price - day_low) / (day_high - day_low)) * 100.0
+        return ((day_high - price) / (day_high - day_low)) * 100.0
 
 
 class NewCandleHighLowStrategy(FilterStrategy):
-    """New N-candle high or low."""
+    """New N-candle high or low -- OPCION_EXTREMO elige cual (antes se
+    ignoraba y devolvia 1.0/-1.0 para cualquiera de los dos, sin filtrar por
+    la seleccion del usuario)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
@@ -104,33 +113,46 @@ class NewCandleHighLowStrategy(FilterStrategy):
         curr = data.candles[-1]
         if any(c.high is None or c.low is None for c in prior) or curr.high is None or curr.low is None:
             return None
+        opcion = self._param_str(EnumParametro.OPCION_EXTREMO_NEW_CANDLE, "HIGH")
+        if opcion == "LOW":
+            prev_low = min(c.low for c in prior)
+            return 1.0 if curr.low < prev_low else 0.0
         prev_high = max(c.high for c in prior)
-        prev_low = min(c.low for c in prior)
-        if curr.high > prev_high:
-            return 1.0
-        if curr.low < prev_low:
-            return -1.0
-        return 0.0
+        return 1.0 if curr.high > prev_high else 0.0
 
 
 class PercentagePullbackHighsLowsStrategy(FilterStrategy):
-    """Percentage pullback from recent high/low."""
+    """Percentage pullback from recent high, or rally from recent low --
+    PUNTO_REFERENCIA_PULLBACK elige cual (antes se ignoraba y siempre
+    calculaba el retroceso desde el HIGH)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 5:
             return None
         recent = data.candles[-5:]
-        if any(c.high is None for c in recent) or data.candles[-1].close is None:
+        price = data.candles[-1].close
+        if price is None:
+            return None
+        punto = self._param_str(EnumParametro.PUNTO_REFERENCIA_PULLBACK, "ALTO")
+        if punto == "BAJO":
+            if any(c.low is None for c in recent):
+                return None
+            low = min(c.low for c in recent)
+            if low <= 0:
+                return None
+            return ((price - low) / low) * 100.0
+        if any(c.high is None for c in recent):
             return None
         high = max(c.high for c in recent)
-        price = data.candles[-1].close
         if high <= 0:
             return None
         return ((high - price) / high) * 100.0
 
 
 class BreakOverRecentHighsLowsStrategy(FilterStrategy):
-    """Price breaking above/below recent N-bar range."""
+    """Price breaking above/below recent N-bar range -- OPCION_EXTREMO elige
+    cual lado (antes se ignoraba y devolvia 1.0/-1.0 para cualquiera de los
+    dos, sin filtrar por la seleccion del usuario)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
@@ -139,13 +161,12 @@ class BreakOverRecentHighsLowsStrategy(FilterStrategy):
         curr = data.candles[-1]
         if any(c.high is None or c.low is None for c in prior) or curr.close is None:
             return None
+        opcion = self._param_str(EnumParametro.OPCION_EXTREMO_BREAK_OVER, "HIGH")
+        if opcion == "LOW":
+            prev_low = min(c.low for c in prior)
+            return 1.0 if curr.close < prev_low else 0.0
         prev_high = max(c.high for c in prior)
-        prev_low = min(c.low for c in prior)
-        if curr.close > prev_high:
-            return 1.0
-        if curr.close < prev_low:
-            return -1.0
-        return 0.0
+        return 1.0 if curr.close > prev_high else 0.0
 
 
 class OpeningRangeBreakdownStrategy(FilterStrategy):

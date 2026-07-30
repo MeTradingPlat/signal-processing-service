@@ -116,28 +116,29 @@ _FILTRO_CATEGORY_FALLBACK: dict[EnumFiltro, EnumCategoriaFiltro] = {
     EnumFiltro.SHORT_RATIO: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
     EnumFiltro.DAYS_UNTIL_EARNINGS: EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
     EnumFiltro.VOLUME: EnumCategoriaFiltro.VOLUMEN,
-    EnumFiltro.AVERAGE_VOLUME: EnumCategoriaFiltro.VOLUMEN,
     EnumFiltro.VOLUMEN_POST_PRE: EnumCategoriaFiltro.VOLUMEN,
-    EnumFiltro.RELATIVE_VOLUME: EnumCategoriaFiltro.VOLUMEN,
-    EnumFiltro.RELATIVE_VOLUME_SAME_TIME: EnumCategoriaFiltro.VOLUMEN,
-    EnumFiltro.VOLUME_SPIKE: EnumCategoriaFiltro.VOLUMEN,
     EnumFiltro.CHANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
-    EnumFiltro.PERCENTAGE_CHANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.PRECIO: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.GAP_FROM_CLOSE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.POSITION_IN_RANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.PERCENTAGE_RANGE: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.RANGE_DOLLARS: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
-    EnumFiltro.CROSSING_ABOVE_BELOW: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
     EnumFiltro.HALT: EnumCategoriaFiltro.PRECIO_Y_MOVIMIENTO,
-    # DISTANCE_FROM_VWAP/EMA/MA NO van aca: sus estrategias necesitan velas
-    # (calculan VWAP/EMA/SMA), pero la etapa dinamica solo construye
-    # MarketData con quote (candles=None siempre) -- listarlos como
-    # PRECIO_Y_MOVIMIENTO hacia que compute_value devolviera None SIEMPRE,
-    # y como se exige que todos los dinamicos pasen a la vez, ningun simbolo
-    # podia pasar nunca (confirmado en vivo: "6149 -> 0" en cada ciclo, sin
-    # excepcion, para un escaner con DISTANCE_FROM_VWAP). Sin entrada aca
-    # caen por defecto en tecnicos, donde si se les pasan velas reales.
+    # DISTANCE_FROM_VWAP/EMA/MA, PERCENTAGE_CHANGE, AVERAGE_VOLUME,
+    # RELATIVE_VOLUME(_SAME_TIME), VOLUME_SPIKE, CROSSING_ABOVE_BELOW NO van
+    # aca: sus estrategias necesitan velas reales (promedios/comparacion
+    # historica de volumen, EMA/VWAP, cambio sobre N barras) -- la etapa
+    # dinamica solo construye MarketData con quote (candles=None siempre), asi
+    # que listarlos aca hacia que compute_value devolviera None SIEMPRE, y
+    # como se exige que todos los dinamicos pasen a la vez, ningun simbolo
+    # podia pasar nunca (confirmado en vivo: "6149 -> 0" en cada ciclo para un
+    # escaner con DISTANCE_FROM_VWAP). Sin entrada aca caen por defecto en
+    # tecnicos, donde si se les pasan velas reales.
+    #
+    # VOLUME/POSITION_IN_RANGE/PERCENTAGE_RANGE/RANGE_DOLLARS/CHANGE si se
+    # quedan aca porque son datos puntuales (no series historicas) que ya
+    # vienen en el fundamental REST que _aplicar_dinamicos ya tiene en
+    # memoria -- ver el enriquecimiento del quote mas abajo.
 }
 
 
@@ -237,7 +238,20 @@ class SymbolPipeline:
             if price is None:
                 continue
             fund = self._fundamentals.get(sym)
-            quote = QuoteResponse(symbol=sym, last=price)
+            quote = QuoteResponse(
+                symbol=sym,
+                last=price,
+                # VOLUME/POSITION_IN_RANGE/PERCENTAGE_RANGE/RANGE_DOLLARS/CHANGE
+                # necesitan volumen y rango del dia, que el quote ligero no trae
+                # por si solo -- pero ya estan en fund (REST, ya en memoria de
+                # _fetch_fundamentals), asi que se copian aca en vez de pedir
+                # nada nuevo.
+                volume=fund.dayVolume if fund else None,
+                open=fund.open if fund else None,
+                high=fund.high if fund else None,
+                low=fund.low if fund else None,
+                prevClose=fund.prevClose if fund else None,
+            )
             data = _make_marketdata(sym, fund, None, quote)
             if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
                 remaining.append(sym)

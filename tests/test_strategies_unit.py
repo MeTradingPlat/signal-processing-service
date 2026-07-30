@@ -76,9 +76,14 @@ AAPL_QUOTE = _make_quote(
 
 def _make_candles(prices: list[tuple[float, float, float, float, float]]):
     """(open, high, low, close, volume) tuples"""
+    from datetime import datetime, timezone
+    # Fecha real de hoy, no una fija -- varias estrategias ahora filtran por
+    # "velas de hoy" (_todays_candles), y una fecha hardcodeada solo coincide
+    # con "hoy" el dia en que se escribio el test.
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     candles = []
     for i, (o, h, l, c, v) in enumerate(prices):
-        ts = f"2026-07-21T{10 + i // 12:02d}:{(i % 12) * 5:02d}:00Z"
+        ts = f"{today}T{10 + i // 12:02d}:{(i % 12) * 5:02d}:00Z"
         candles.append(_make_candle(open=o, high=h, low=l, close=c, volume=v, timestamp=ts))
     return candles
 

@@ -108,7 +108,13 @@ class ThroughEMAVWAPAlertStrategy(FilterStrategy):
 
 
 class EMAVWAPSupportResistanceStrategy(FilterStrategy):
-    """Price bouncing off EMA/VWAP support/resistance."""
+    """Price bouncing off EMA/VWAP support/resistance: definicion estandar
+    confirmada -- el precio se acerca a la linea (pullback), se mantiene del
+    MISMO lado (no la cruza) y luego se aleja de nuevo. Con solo 2 velas
+    (lo que habia antes, la resta de distancias absolutas) no se puede
+    distinguir un rebote real de simplemente estar alejandose por primera
+    vez -- hacen falta 3 puntos: lejos, cerca, lejos otra vez. Devuelve 0.0
+    cuando no hay rebote confirmado en esta vela."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 3 or any(c.close is None for c in data.candles):
@@ -117,11 +123,25 @@ class EMAVWAPSupportResistanceStrategy(FilterStrategy):
         periodo = self._param_int(EnumParametro.PERIODO_EMA_EMA_VWAP_SUPPORT, 9)
         closes = [c.close for c in data.candles]
         if linea == "VWAP":
-            ref = _calc_vwap(data.candles)
+            # VWAP se mueve lento bar a bar (pondera por todo el volumen del
+            # dia), a diferencia de una EMA corta -- una sola foto final es
+            # una aproximacion razonable para los 3 puntos.
+            ref1 = ref2 = ref3 = _calc_vwap(data.candles)
         else:
-            ref = _calc_ema(closes, periodo)
-        if ref is None or ref <= 0:
+            # La EMA si cambia bar a bar de forma significativa -- calcularla
+            # "tal como estaba" en cada uno de los 3 puntos (con los datos
+            # disponibles hasta ese momento), no reusar el valor final para
+            # los tres, o la comparacion de lejos/cerca/lejos queda mal.
+            ref1 = _calc_ema(closes[:-2], periodo)
+            ref2 = _calc_ema(closes[:-1], periodo)
+            ref3 = _calc_ema(closes, periodo)
+        if ref1 is None or ref2 is None or ref3 is None or ref1 <= 0 or ref2 <= 0 or ref3 <= 0:
             return None
-        prev_distance = (closes[-2] / ref) - 1.0
-        curr_distance = (closes[-1] / ref) - 1.0
-        return abs(curr_distance) - abs(prev_distance)
+        d1 = (closes[-3] / ref1 - 1.0) * 100.0
+        d2 = (closes[-2] / ref2 - 1.0) * 100.0
+        d3 = (closes[-1] / ref3 - 1.0) * 100.0
+        same_side = (d1 > 0 and d2 > 0 and d3 > 0) or (d1 < 0 and d2 < 0 and d3 < 0)
+        approached_then_retreated = abs(d2) < abs(d1) and abs(d3) > abs(d2)
+        if not (same_side and approached_then_retreated):
+            return 0.0
+        return d3

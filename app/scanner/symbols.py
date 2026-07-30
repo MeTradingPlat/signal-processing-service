@@ -317,11 +317,20 @@ class SymbolPipeline:
 
 
 def _minutos_to_label(minutos: int) -> str:
+    # Nunca manejaba meses/anios -- cualquier cosa >= 1 semana (10080 min)
+    # caia en el "else" y se etiquetaba como "W<n>" sin importar que tan
+    # grande fuera, asi que 1MO/3MO/6MO/1Y (43200/129600/259200/525600 min)
+    # se mandaban a marketdata-service como "W4"/"W12"/"W25"/"W52" -- ninguno
+    # de esos existe en EnumTimeframe, asi que esos 4 timeframes fallaban en
+    # silencio igual que los que ya se arreglaron en marketdata-service.
     if minutos < 60:
         return f"M{minutos}"
-    elif minutos < 1440:
+    if minutos < 1440:
         return f"H{minutos // 60}"
-    elif minutos < 10080:
+    if minutos < 10080:
         return f"D{minutos // 1440}"
-    else:
+    if minutos < 43200:
         return f"W{minutos // 10080}"
+    if minutos < 525600:
+        return f"MO{minutos // 43200}"
+    return "Y1"

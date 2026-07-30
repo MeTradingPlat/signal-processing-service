@@ -69,7 +69,14 @@ class BackToEMAAlertStrategy(FilterStrategy):
 
 
 class ThroughEMAVWAPAlertStrategy(FilterStrategy):
-    """Price crossing through EMA/VWAP."""
+    """Price actually crossing through EMA/VWAP this bar -- el cierre previo
+    estaba a un lado de la linea y el actual quedo del otro. Antes solo
+    calculaba la distancia actual (identica a DistanceFromEMA), sin comparar
+    contra la vela anterior, asi que nunca detectaba un cruce real, solo
+    "que tan cerca esta ahora". Devuelve 0.0 cuando no hubo cruce en esta
+    vela (mismo patron 0/valor-con-signo que las demas estrategias de
+    patrones), o la distancia % con signo (positivo = cruzo hacia arriba)
+    cuando si lo hubo."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2 or any(c.close is None for c in data.candles):
@@ -83,7 +90,12 @@ class ThroughEMAVWAPAlertStrategy(FilterStrategy):
             ref = _calc_ema(closes, periodo)
         if ref is None or ref <= 0:
             return None
-        return ((closes[-1] / ref) - 1.0) * 100.0
+        prev_close, curr_close = closes[-2], closes[-1]
+        crossed_up = prev_close <= ref < curr_close
+        crossed_down = prev_close >= ref > curr_close
+        if not (crossed_up or crossed_down):
+            return 0.0
+        return ((curr_close / ref) - 1.0) * 100.0
 
 
 class EMAVWAPSupportResistanceStrategy(FilterStrategy):

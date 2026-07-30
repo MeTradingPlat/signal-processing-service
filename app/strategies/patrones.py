@@ -33,11 +33,14 @@ class BearishBullishEngulfingStrategy(FilterStrategy):
         prev_bullish = prev.close > prev.open
         curr_bullish = curr.close > curr.open
         curr_bearish = curr.close < curr.open
+        # <= / >= (no estricto): un gap que abre justo en el cierre anterior
+        # sigue contando como que el cuerpo lo envuelve, no solo un gap mas
+        # amplio.
         bullish_engulfing = (
-            prev_bearish and curr_bullish and curr.open < prev.close and curr.close > prev.open
+            prev_bearish and curr_bullish and curr.open <= prev.close and curr.close >= prev.open
         )
         bearish_engulfing = (
-            prev_bullish and curr_bearish and curr.open > prev.close and curr.close < prev.open
+            prev_bullish and curr_bearish and curr.open >= prev.close and curr.close <= prev.open
         )
         if bullish_engulfing:
             return 1.0 if tipo == "BULLISH" else -1.0

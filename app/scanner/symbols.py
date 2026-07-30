@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 from typing import Dict, List, Optional
 
@@ -96,6 +97,12 @@ def _get_strategy(filtro: Filtro) -> FilterStrategy:
 class _PassthroughStrategy(FilterStrategy):
     def compute_value(self, data: MarketData) -> float:
         return 1.0
+
+# Tamano de lote y concurrencia para evaluar_tecnicos -- ver
+# _evaluar_grupo_tecnico para el porque (acotar memoria sin perder el
+# paralelismo que marketdata-service ya hace internamente por conexion).
+_CANDLE_CHUNK_SIZE = 700
+_CANDLE_CHUNK_WORKERS = 4
 
 _STATIC_PRE: set[EnumCategoriaFiltro] = {
     EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
@@ -266,38 +273,67 @@ class SymbolPipeline:
             if not candidates:
                 break
             tf_label = _minutos_to_label(minutos)
-            try:
-                batch = list(candidates)
-                bars_needed = max(150, minutos * 2)
-                candles_map = self._client.fetch_candles(batch, tf_label, bars=bars_needed)
-            except Exception as e:
-                logger.error("Failed to fetch candles for %s: %s", tf_label, e)
-                continue
-
-            total_bars = sum(len(bars) for bars in candles_map.values())
-            null_bars = sum(
-                1 for bars in candles_map.values() for c in bars
-                if c.open is None or c.high is None or c.low is None or c.close is None
-            )
+            bars_needed = max(150, minutos * 2)
+            passing, stats = self._evaluar_grupo_tecnico(candidates, filtros, tf_label, bars_needed, matched)
             logger.info(
                 "evaluar_tecnicos %s: %d symbols, %d/%d bars with a null OHLC field",
-                tf_label, len(candles_map), null_bars, total_bars,
+                tf_label, stats[0], stats[1], stats[2],
             )
-
-            passing = set()
-            for sym in candidates:
-                candles = candles_map.get(sym, [])
-                if not candles:
-                    continue
-                fund = self._fundamentals.get(sym)
-                data = _make_marketdata(sym, fund, candles, None)
-                sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
-                if len(sym_matches) == len(filtros):
-                    matched[sym].extend(sym_matches)
-                    passing.add(sym)
             candidates = passing
 
         return {sym: matched[sym] for sym in candidates}
+
+    def _evaluar_grupo_tecnico(
+        self, candidates: set[str], filtros: list[Filtro], tf_label: str, bars_needed: int,
+        matched: dict[str, list[Filtro]],
+    ) -> tuple[set[str], tuple[int, int, int]]:
+        """Pide y evalua velas por lotes acotados y concurrentes (no todo el
+        universo candidato de una sola llamada) -- con miles de simbolos, una
+        sola peticion gigante mantiene todas sus velas en memoria a la vez
+        hasta terminar de evaluar el filtro completo, lo que ya provoco un
+        OutOfMemory real en produccion el mismo dia que el fix de filtros
+        dinamicos empezo a dejar pasar el volumen real de simbolos por
+        primera vez. Los lotes en vuelo se limitan a _CANDLE_CHUNK_WORKERS a
+        la vez (concurrentes, no secuenciales, para no perder el paralelismo
+        que marketdata-service ya hace internamente por conexion) y cada uno
+        se evalua y se descarta apenas llega, en vez de acumular todos antes
+        de evaluar nada."""
+        batch = list(candidates)
+        chunks = [batch[i:i + _CANDLE_CHUNK_SIZE] for i in range(0, len(batch), _CANDLE_CHUNK_SIZE)]
+
+        def fetch_chunk(chunk: list[str]) -> dict[str, list[CandleResponse]]:
+            try:
+                return self._client.fetch_candles(chunk, tf_label, bars=bars_needed)
+            except Exception as e:
+                logger.error("Failed to fetch candles for %s (chunk of %d): %s", tf_label, len(chunk), e)
+                return {}
+
+        passing: set[str] = set()
+        symbols_with_data = 0
+        total_bars = 0
+        null_bars = 0
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_CANDLE_CHUNK_WORKERS) as executor:
+            futures = [executor.submit(fetch_chunk, chunk) for chunk in chunks]
+            for future in concurrent.futures.as_completed(futures):
+                candles_map = future.result()
+                symbols_with_data += len(candles_map)
+                for sym, candles in candles_map.items():
+                    total_bars += len(candles)
+                    null_bars += sum(
+                        1 for c in candles
+                        if c.open is None or c.high is None or c.low is None or c.close is None
+                    )
+                    if not candles:
+                        continue
+                    fund = self._fundamentals.get(sym)
+                    data = _make_marketdata(sym, fund, candles, None)
+                    sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
+                    if len(sym_matches) == len(filtros):
+                        matched[sym].extend(sym_matches)
+                        passing.add(sym)
+
+        return passing, (symbols_with_data, null_bars, total_bars)
 
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")

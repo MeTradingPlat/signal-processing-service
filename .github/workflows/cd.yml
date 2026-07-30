@@ -39,8 +39,8 @@ jobs:
             --name "signal-processing-service" \
             --network "metradingplat-network" \
             --restart "unless-stopped" \
-            --memory "512m" \
-            --memory-swap "512m" \
+            --memory "1536m" \
+            --memory-swap "1536m" \
             --label project="metradingplat" \
             --label service="signal-processing-service" \
             -e SP_SCANNER_MANAGEMENT_URL="http://scanner-management-service:8081" \

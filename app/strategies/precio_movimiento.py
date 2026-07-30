@@ -108,7 +108,11 @@ class RangeDollarsStrategy(FilterStrategy):
 
 
 class CrossingAboveBelowStrategy(FilterStrategy):
-    """Price crossing above/below EMA level."""
+    """Price actually crossing above/below the EMA this bar -- el cierre
+    previo estaba a un lado de la EMA y el actual quedo del otro. Mismo bug
+    que ThroughEMAVWAPAlertStrategy (momentum.py): solo calculaba la
+    distancia actual, identico a estar simplemente cerca de la linea, sin
+    comparar contra la vela anterior para confirmar un cruce real."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or len(data.candles) < 2:
@@ -122,8 +126,12 @@ class CrossingAboveBelowStrategy(FilterStrategy):
         ema = _calc_ema(closes, periodo)
         if ema <= 0:
             return None
-        current = closes[-1]
-        return ((current / ema) - 1.0) * 100.0
+        prev_close, curr_close = closes[-2], closes[-1]
+        crossed_up = prev_close <= ema < curr_close
+        crossed_down = prev_close >= ema > curr_close
+        if not (crossed_up or crossed_down):
+            return 0.0
+        return ((curr_close / ema) - 1.0) * 100.0
 
 
 class HaltStrategy(FilterStrategy):

@@ -387,8 +387,10 @@ class SymbolPipeline:
                     sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
                     if len(sym_matches) == len(filtros):
                         vela_timestamp = candles[-1].timestamp
+                        precio = candles[-1].close
                         matched[sym].extend(
-                            SignalMatch(filtro=f, vela_timestamp=vela_timestamp) for f in sym_matches
+                            SignalMatch(filtro=f, vela_timestamp=vela_timestamp, precio=precio)
+                            for f in sym_matches
                         )
                         passing.add(sym)
 

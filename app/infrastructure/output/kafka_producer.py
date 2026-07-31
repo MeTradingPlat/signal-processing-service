@@ -3,6 +3,8 @@ import logging
 from datetime import datetime, timezone
 
 from app.config import settings
+from app.scanner.symbols import _minutos_to_label
+from app.scanner.timeframe import extraer_timeframe_minutos
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ def _get_producer():
     return _producer
 
 
-def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
+def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: set):
     producer = _get_producer()
     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
@@ -38,9 +40,16 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
     # "signals" (estado actual, se limpiaba cada ciclo) que solo alimentaba
     # la pestaña "Activos" ya eliminada junto con asset-management-service.
     signal_count = 0
-    for symbol, passed_filters in signals.items():
-        filtros_json = json.dumps([f.enumFiltro.name for f in passed_filters])
-        filtros_nombres = ", ".join([f.enumFiltro.name for f in passed_filters])
+    for symbol, passed_matches in signals.items():
+        filtros_nombres = ", ".join([sm.filtro.enumFiltro.name for sm in passed_matches])
+        metadatos_json = json.dumps([
+            {
+                "filtro": sm.filtro.enumFiltro.name,
+                "timeframe": _minutos_to_label(extraer_timeframe_minutos(sm.filtro)),
+                "velaTimestamp": sm.vela_timestamp.replace(tzinfo=None).isoformat(),
+            }
+            for sm in passed_matches
+        ])
         log_event = {
             "servicioOrigen": settings.servicio_origen,
             "nivel": "INFO",
@@ -49,7 +58,8 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict):
             "symbol": symbol,
             "categoria": "SIGNAL",
             "timestamp": now,
-            "metadatos": filtros_json,
+            "metadatos": metadatos_json,
+            "esSenalNueva": symbol in nuevos,
         }
         try:
             if producer and producer is not False:

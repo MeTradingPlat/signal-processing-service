@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from app.models.enums import EnumCategoriaFiltro, EnumFiltro
 from app.models.escaner import Escaner
 from app.models.filtro import Filtro
+from app.models.signal_match import SignalMatch
 from app.scanner.marketdata_client import MarketdataClient
 from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
 from app.scanner.timeframe import bars_necesarias_grupo
@@ -208,6 +209,14 @@ class SymbolPipeline:
         self._filtrados: List[str] = []
         self._client = MarketdataClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
+        # Confirmado en vivo: sin esto, cada simbolo que sigue calificando se
+        # republicaba como "senal nueva" en cada ciclo (~60s), inundando las
+        # notificaciones en vivo con avisos repetidos para los mismos ~70
+        # simbolos. Estado en memoria por proceso -- seguro porque hay un
+        # multiprocessing.Process dedicado por escaner (ver orchestrator/),
+        # sin fan-out entre procesos para la evaluacion. Se pierde en un
+        # redeploy, lo que genera una unica rafaga (no repetida) al arrancar.
+        self._previously_matched: set = set()
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
             escaner.idEscaner, self.mercados,
@@ -312,9 +321,9 @@ class SymbolPipeline:
         self._filtrados = remaining
         logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(quotes), len(self._filtrados))
 
-    def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[Filtro]]:
+    def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[SignalMatch]]:
         candidates = set(self._filtrados)
-        matched: dict[str, list[Filtro]] = {sym: [] for sym in candidates}
+        matched: dict[str, list[SignalMatch]] = {sym: [] for sym in candidates}
 
         for minutos, filtros in grupos.items():
             if not candidates:
@@ -332,7 +341,7 @@ class SymbolPipeline:
 
     def _evaluar_grupo_tecnico(
         self, candidates: set[str], filtros: list[Filtro], tf_label: str, bars_needed: int,
-        matched: dict[str, list[Filtro]],
+        matched: dict[str, list[SignalMatch]],
     ) -> tuple[set[str], tuple[int, int, int]]:
         """Pide y evalua velas por lotes acotados y concurrentes (no todo el
         universo candidato de una sola llamada) -- con miles de simbolos, una
@@ -377,7 +386,10 @@ class SymbolPipeline:
                     data = _make_marketdata(sym, fund, candles, None)
                     sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
                     if len(sym_matches) == len(filtros):
-                        matched[sym].extend(sym_matches)
+                        vela_timestamp = candles[-1].timestamp
+                        matched[sym].extend(
+                            SignalMatch(filtro=f, vela_timestamp=vela_timestamp) for f in sym_matches
+                        )
                         passing.add(sym)
 
         return passing, (symbols_with_data, null_bars, total_bars)
@@ -385,6 +397,16 @@ class SymbolPipeline:
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")
         self.cargar_todos()
+        self._previously_matched = set()
+
+    def nuevos_symbols(self, signals: dict) -> set:
+        """Simbolos que empiezan a calificar en este ciclo (no calificaban en
+        el anterior). Reemplaza el estado, no lo une, para que un simbolo que
+        deja de calificar y vuelve a calificar despues cuente como nuevo otra
+        vez."""
+        nuevos = set(signals) - self._previously_matched
+        self._previously_matched = set(signals)
+        return nuevos
 
     @property
     def todos(self) -> List[str]:

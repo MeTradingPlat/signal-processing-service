@@ -93,18 +93,19 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
     if pipeline.tecnicos:
         grupos = agrupar_por_timeframe(pipeline.tecnicos)
         signals = pipeline.evaluar_tecnicos(grupos)
-        _publish_signals(escaner, signals)
+        nuevos = pipeline.nuevos_symbols(signals)
+        _publish_signals(escaner, signals, nuevos)
         if signals:
             logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
                         escaner.idEscaner, len(signals), list(signals.keys())[:5])
 
 
-def _publish_signals(escaner: Escaner, signals: dict):
+def _publish_signals(escaner: Escaner, signals: dict, nuevos: set):
     from app.infrastructure.output.kafka_producer import publish_signals as kafka_publish
     _clear_old_signals(escaner.idEscaner)
     logger.info("SIGNALS: scanner='%s' id=%d count=%d",
                 escaner.nombre, escaner.idEscaner, len(signals))
-    kafka_publish(escaner.idEscaner, escaner.nombre, signals)
+    kafka_publish(escaner.idEscaner, escaner.nombre, signals, nuevos)
 
 
 def _clear_old_signals(scanner_id: int):
@@ -141,7 +142,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     # La ventana recien cerro -- limpiar ahora en vez de
                     # dejar el ultimo resultado de la sesion mostrandose como
                     # "ACTIVO" toda la noche hasta el primer ciclo de manana.
-                    _publish_signals(escaner, {})
+                    _publish_signals(escaner, {}, set())
                 last_date = None
                 next_run = next_trading_window(escaner.horaInicio, now)
                 wait = (next_run - now).total_seconds()

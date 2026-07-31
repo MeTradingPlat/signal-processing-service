@@ -225,26 +225,33 @@ def _calc_atr(candles: list[CandleResponse], period: int, modo: str = "RMA") -> 
 
 
 def _calc_rsi(candles: list[CandleResponse], period: int) -> float | None:
-    """Wilder's RSI: initial SMA then smoothed avg gain/loss"""
+    """Wilder's RSI: seed de las primeras `period` VELAS, luego suavizado --
+    antes tomaba `gains[:period]`/`losses[:period]` de las listas ya
+    filtradas de ganancias/perdidas de toda la ventana, mezclando barras de
+    momentos distintos entre la seed de ganancias y la de perdidas (Wilder
+    exige que la seed venga de las mismas primeras `period` velas para
+    ambas). Con el margen de barras que timeframe.py siempre pide
+    (periodo*3) esta rama se ejecuta en el uso normal, no es un caso raro."""
     if len(candles) < period + 1:
         return None
     if any(c.close is None for c in candles):
         return None
     closes = [c.close for c in candles]
     changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-    gains = [c for c in changes if c > 0]
-    losses = [-c for c in changes if c < 0]
-    if not gains and not losses:
+    if not any(changes):
         return 50.0
     if len(changes) <= period:
+        gains = [c for c in changes if c > 0]
+        losses = [-c for c in changes if c < 0]
         avg_gain = sum(gains) / len(changes) if gains else 0.0
         avg_loss = sum(losses) / len(changes) if losses else 0.0
     else:
-        avg_gain = sum(gains[:period]) / period
-        avg_loss = sum(losses[:period]) / period
-        for i in range(period, len(changes)):
-            g = changes[i] if changes[i] > 0 else 0.0
-            l = -changes[i] if changes[i] < 0 else 0.0
+        seed = changes[:period]
+        avg_gain = sum(c for c in seed if c > 0) / period
+        avg_loss = sum(-c for c in seed if c < 0) / period
+        for change in changes[period:]:
+            g = change if change > 0 else 0.0
+            l = -change if change < 0 else 0.0
             avg_gain = (avg_gain * (period - 1) + g) / period
             avg_loss = (avg_loss * (period - 1) + l) / period
     if avg_loss == 0:

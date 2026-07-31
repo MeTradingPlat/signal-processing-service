@@ -155,11 +155,39 @@ _FILTRO_CATEGORY_FALLBACK: dict[EnumFiltro, EnumCategoriaFiltro] = {
 }
 
 
+# Filtros cuya estrategia SIEMPRE necesita velas reales -- si la API manda
+# una categoria de "precio y movimiento" o "volumen" para estos (bug
+# confirmado en scanner-management-service: varias FiltroFactory*.java
+# tenian la categoria de Java desalineada con lo que su propia estrategia
+# Python necesita), no se puede confiar en esa categoria: la etapa dinamica
+# construye MarketData con candles=None siempre, asi que compute_value
+# devolveria None SIEMPRE y ningun simbolo pasaria nunca (confirmado en
+# vivo: "2114 -> 0" en cada ciclo con PERCENTAGE_CHANGE). Esta lista manda
+# por encima de lo que diga la API, no solo cuando la categoria viene vacia.
+_REQUIERE_VELAS: set[EnumFiltro] = {
+    EnumFiltro.PERCENTAGE_CHANGE,
+    EnumFiltro.CROSSING_ABOVE_BELOW,
+    EnumFiltro.VOLUME_SPIKE,
+    EnumFiltro.RELATIVE_VOLUME,
+    EnumFiltro.RELATIVE_VOLUME_SAME_TIME,
+    EnumFiltro.AVERAGE_VOLUME,
+    EnumFiltro.DISTANCE_FROM_VWAP,
+    EnumFiltro.DISTANCE_FROM_EMA,
+    EnumFiltro.DISTANCE_FROM_MA,
+    EnumFiltro.BACK_TO_EMA_ALERT,
+    EnumFiltro.THROUGH_EMA_VWAP_ALERT,
+    EnumFiltro.EMA_VWAP_SUPPORT_RESISTANCE,
+}
+
+
 def categorizar_filtros(filtros: List[Filtro]) -> tuple[List[Filtro], List[Filtro], List[Filtro]]:
     estaticos = []
     dinamicos = []
     tecnicos = []
     for f in filtros:
+        if f.enumFiltro in _REQUIERE_VELAS:
+            tecnicos.append(f)
+            continue
         cat = f.objCategoria.enumCategoriaFiltro if f.objCategoria else None
         if cat is None and f.enumFiltro:
             cat = _FILTRO_CATEGORY_FALLBACK.get(f.enumFiltro)

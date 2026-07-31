@@ -43,6 +43,7 @@ def _get_strategy(filtro: Filtro) -> FilterStrategy:
     from app.strategies.volatilidad import ATRPStrategy, ATRStrategy, RelativeRangeStrategy
     from app.strategies.volumen.average_volume import AverageVolumeStrategy
     from app.strategies.volumen.relative_volume import RelativeVolumeStrategy
+    from app.strategies.volumen.relative_volume_same_time import RelativeVolumeSameTimeStrategy
     from app.strategies.volumen.volume import VolumeStrategy
     from app.strategies.volumen.volume_spike import VolumeSpikeStrategy
     from app.strategies.volumen.volumen_post_pre import VolumenPostPreStrategy
@@ -51,7 +52,7 @@ def _get_strategy(filtro: Filtro) -> FilterStrategy:
         "AVERAGE_VOLUME": AverageVolumeStrategy,
         "VOLUMEN_POST_PRE": VolumenPostPreStrategy,
         "RELATIVE_VOLUME": RelativeVolumeStrategy,
-        "RELATIVE_VOLUME_SAME_TIME": RelativeVolumeStrategy,
+        "RELATIVE_VOLUME_SAME_TIME": RelativeVolumeSameTimeStrategy,
         "VOLUME_SPIKE": VolumeSpikeStrategy,
         "CHANGE": ChangeStrategy,
         "PERCENTAGE_CHANGE": PercentageChangeStrategy,

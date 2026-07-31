@@ -46,6 +46,14 @@ _DAY_ANCHORED: set[EnumFiltro] = {
     EnumFiltro.OPENING_RANGE_BREAKDOWN,
     EnumFiltro.FIRST_CANDLE,
 }
+
+# Filtros que comparan la vela actual contra la misma franja horaria en N
+# dias anteriores -- necesitan cubrir dias COMPLETOS hacia atras, no solo
+# el de hoy. El numero debe coincidir con el _DIAS_COMPARACION de cada
+# estrategia correspondiente.
+_MULTI_DAY_COMPARISON: dict[EnumFiltro, int] = {
+    EnumFiltro.RELATIVE_VOLUME_SAME_TIME: 5,
+}
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1M": 1, "2M": 2, "3M": 3, "5M": 5, "10M": 10,
     "15M": 15, "30M": 30, "45M": 45,
@@ -117,6 +125,12 @@ def _barras_para_cubrir_hoy(minutos: int) -> int:
     return (minutos_desde_medianoche // minutos) + 5
 
 
+def _barras_para_cubrir_dias(minutos: int, dias: int) -> int:
+    barras_hoy = _barras_para_cubrir_hoy(minutos)
+    barras_por_dia_completo = 1440 // minutos
+    return barras_hoy + dias * barras_por_dia_completo
+
+
 def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
     """Cuantas barras necesita ESTE filtro para producir un valor valido y
     estable, segun su propio periodo/config -- no un numero fijo por
@@ -132,6 +146,8 @@ def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
         return _FIXED_LOOKBACK[enum_filtro]
     if enum_filtro in _DAY_ANCHORED:
         return _barras_para_cubrir_hoy(minutos)
+    if enum_filtro in _MULTI_DAY_COMPARISON:
+        return _barras_para_cubrir_dias(minutos, _MULTI_DAY_COMPARISON[enum_filtro])
     return 0
 
 

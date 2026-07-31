@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+import time
 from typing import Dict, List, Optional
 
 from app.models.enums import EnumCategoriaFiltro, EnumFiltro
@@ -11,6 +12,9 @@ from app.scanner.timeframe import bars_necesarias_grupo
 from app.strategies.base import FilterStrategy, MarketData
 
 logger = logging.getLogger(__name__)
+
+_FETCH_SYMBOLS_RETRIES = 3
+_FETCH_SYMBOLS_RETRY_BACKOFF_SECONDS = 3.0
 
 
 def _make_marketdata(
@@ -183,15 +187,28 @@ class SymbolPipeline:
         )
 
     def cargar_todos(self):
+        """Reintenta con backoff corto antes de rendirse -- confirmado en
+        vivo: un simple restart de marketdata-service (segundos de
+        "Connection refused") tumbaba esta llamada UNA vez al arrancar el
+        escaner, y como nada mas la volvia a intentar, el escaner se quedaba
+        evaluando una lista de simbolos vacia por horas, sin ningun error
+        visible salvo un log suelto. El reintento por ciclo (ver runner.py,
+        _run_daily/_run_loop_until_end) cubre caidas mas largas que este
+        backoff corto."""
         logger.info("SymbolPipeline: fetching symbols for markets=%s", self.mercados)
-        try:
-            self._todos = self._client.fetch_symbols(self.mercados)
-            self._filtrados = list(self._todos)
-            logger.info("SymbolPipeline: loaded %d symbols", len(self._todos))
-        except Exception as e:
-            logger.error("SymbolPipeline: failed to fetch symbols: %s", e)
-            self._todos = []
-            self._filtrados = []
+        for intento in range(1, _FETCH_SYMBOLS_RETRIES + 1):
+            try:
+                self._todos = self._client.fetch_symbols(self.mercados)
+                self._filtrados = list(self._todos)
+                logger.info("SymbolPipeline: loaded %d symbols", len(self._todos))
+                return
+            except Exception as e:
+                logger.error("SymbolPipeline: failed to fetch symbols (intento %d/%d): %s",
+                             intento, _FETCH_SYMBOLS_RETRIES, e)
+                if intento < _FETCH_SYMBOLS_RETRIES:
+                    time.sleep(_FETCH_SYMBOLS_RETRY_BACKOFF_SECONDS * intento)
+        self._todos = []
+        self._filtrados = []
 
     def _fetch_fundamentals(self):
         if not self._todos:

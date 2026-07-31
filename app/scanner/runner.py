@@ -74,6 +74,18 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
     logger.info("ScannerRunner: UNA_VEZ completed id=%d", escaner.idEscaner)
 
 
+def _reintentar_carga_si_vacia(pipeline: SymbolPipeline):
+    """cargar_todos() ya reintenta unas pocas veces con backoff corto por su
+    cuenta, pero si la caida de marketdata-service dura mas que eso, sin
+    esto el escaner se quedaba evaluando una lista vacia de simbolos el
+    resto del dia -- confirmado en vivo: un restart de marketdata-service
+    dejo un escaner sin escanear nada por horas, hasta que se reinicio el
+    proceso a mano. Reintentar en cada ciclo (~60s) mientras siga vacia se
+    recupera solo apenas el servicio vuelva."""
+    if not pipeline.todos:
+        pipeline.cargar_todos()
+
+
 def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
     logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
     pipeline.aplicar_pre_filtros()
@@ -121,6 +133,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     if last_date is not None:
                         pipeline.renovar_si_nuevo_dia()
                     last_date = now.date()
+                _reintentar_carga_si_vacia(pipeline)
                 _do_cycle(escaner, pipeline)
                 _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))
             else:
@@ -149,6 +162,7 @@ def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: dateti
         end = effective_end(escaner.horaFin, now.date())
         if now.time() >= end or not is_within_window(now, escaner.horaInicio, end):
             return
+        _reintentar_carga_si_vacia(pipeline)
         _do_cycle(escaner, pipeline)
         if _now is not None:
             return

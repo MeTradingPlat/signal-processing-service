@@ -38,7 +38,10 @@ def test_una_vez_registry_detects_completion():
     process.start()
     registry.add(2, process)
 
-    process.join(timeout=3)
+    # cargar_todos() ahora reintenta con backoff antes de rendirse (hasta
+    # ~9s sin red, ver test_symbols_retry.py) -- el timeout de join tiene
+    # que cubrir eso, no solo el tiempo de un fetch que falla al instante.
+    process.join(timeout=15)
 
     completed = registry.collect_completed()
     assert 2 in completed

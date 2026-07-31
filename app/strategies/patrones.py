@@ -65,7 +65,9 @@ class ConsecutiveCandlesStrategy(FilterStrategy):
 
 
 class FirstCandleStrategy(FilterStrategy):
-    """First candle of the day type (bullish/bearish)."""
+    """First candle of the day type (bullish/bearish) -- TIPO_VELA_FIRTS_CANDLE
+    elige cual tipo busca el usuario (antes se ignoraba y devolvia 1.0/-1.0
+    para cualquiera de los dos, sin filtrar por la seleccion real)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         todays = _todays_candles(data.candles)
@@ -74,7 +76,12 @@ class FirstCandleStrategy(FilterStrategy):
         first = todays[0]
         if first.close is None or first.open is None:
             return None
-        return 1.0 if first.close > first.open else (-1.0 if first.close < first.open else 0.0)
+        tipo = self._param_str(EnumParametro.TIPO_VELA_FIRTS_CANDLE, "ALCISTA")
+        if first.close > first.open:
+            return 1.0 if tipo == "ALCISTA" else -1.0
+        if first.close < first.open:
+            return 1.0 if tipo == "BAJISTA" else -1.0
+        return 0.0
 
 
 class HighLowOfDayStrategy(FilterStrategy):

@@ -14,13 +14,16 @@ class RSIStrategy(FilterStrategy):
 
 
 class DistanceFromVWAPStrategy(FilterStrategy):
-    """Distance from VWAP/EMA/MA in % -- LINEA_REFERENCIA elige la linea
-    (antes se ignoraba: scanner-management-service solo tiene UNA fabrica
-    para esta familia de filtros, siempre con enumFiltro=DISTANCE_FROM_VWAP
-    sin importar que el usuario elija VWAP/EMA/MA en el dropdown, asi que
+    """Distance from VWAP/EMA/MA -- LINEA_REFERENCIA elige la linea (antes se
+    ignoraba: scanner-management-service solo tiene UNA fabrica para esta
+    familia de filtros, siempre con enumFiltro=DISTANCE_FROM_VWAP sin
+    importar que el usuario elija VWAP/EMA/MA en el dropdown, asi que
     DistanceFromEMAStrategy/DistanceFromMAStrategy nunca se llegaban a
     invocar en la practica -- unificadas aca para que la seleccion real del
-    usuario si tenga efecto)."""
+    usuario si tenga efecto). MODO_DISTANCIA elige la unidad: PRECIO
+    (default) = distancia en dolares, PORCENTAJE = distancia en % (antes se
+    ignoraba tambien y siempre devolvia %, aunque el default en el formulario
+    es PRECIO)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         if not data.candles or data.candles[-1].close is None:
@@ -38,6 +41,9 @@ class DistanceFromVWAPStrategy(FilterStrategy):
             ref = _calc_ema(closes, periodo) if linea == "EMA" else _calc_sma(closes, periodo)
         if ref is None or ref <= 0:
             return None
+        modo = self._param_str(EnumParametro.MODO_DISTANCIA_DISTANCE_FROM_VWAP_EMA_MA, "PRECIO")
+        if modo == "PRECIO":
+            return price - ref
         return ((price / ref) - 1.0) * 100.0
 
 

@@ -16,22 +16,36 @@ class PrecioStrategy(FilterStrategy):
 
 
 class ChangeStrategy(FilterStrategy):
-    """Price change since a reference point (open/prevClose)."""
+    """Price change since a reference point -- PUNTO_REFERENCIA_CHANGE elige
+    el punto: OPEN (apertura de hoy), CLOSE (cierre del dia anterior),
+    CLOSE_PRE_MARKET/CLOSE_POST_MARKET (ultimo precio operado en pre/post
+    market hoy). Las ultimas dos antes no se manejaban -- devolvian None
+    siempre (excluian el simbolo sin aviso) porque no existia ningun dato de
+    precio pre/post market en el sistema; ahora vienen de
+    FundamentalResponse.preMarketClose/postMarketClose (capturados via el
+    evento TradeETH de DxLink en marketdata-service)."""
 
     def compute_value(self, data: MarketData) -> float | None:
         ref = self._param_str(EnumParametro.PUNTO_REFERENCIA_CHANGE, "CLOSE")
         medida = self._param_str(EnumParametro.TIPO_MEDIDA_CHANGE, "PRECIO")
-        current = None
-        reference = None
-        if data.quote:
-            current = getattr(data.quote, "last", None)
-            if ref == "OPEN":
-                reference = getattr(data.quote, "open", None)
-            elif ref in ("CLOSE", "PREV_CLOSE"):
-                reference = getattr(data.quote, "prevClose", None)
+        current = data.quote.last if data.quote else None
         if current is None and data.fundamental:
             current = data.fundamental.open
-            reference = data.fundamental.prevClose
+
+        reference = None
+        if ref == "OPEN":
+            reference = data.quote.open if data.quote else None
+            if reference is None and data.fundamental:
+                reference = data.fundamental.open
+        elif ref == "CLOSE":
+            reference = data.quote.prevClose if data.quote else None
+            if reference is None and data.fundamental:
+                reference = data.fundamental.prevClose
+        elif ref == "CLOSE_PRE_MARKET":
+            reference = data.fundamental.preMarketClose if data.fundamental else None
+        elif ref == "CLOSE_POST_MARKET":
+            reference = data.fundamental.postMarketClose if data.fundamental else None
+
         if current is None or reference is None or reference == 0:
             return None
         diff = current - reference

@@ -56,6 +56,8 @@ class FundamentalResponse(BaseModel):
     daysUntilEarnings: Optional[int] = None
     preMarketVolume: Optional[int] = None
     postMarketVolume: Optional[int] = None
+    preMarketClose: Optional[float] = None
+    postMarketClose: Optional[float] = None
     eps: Optional[float] = None
     dividendAmount: Optional[float] = None
     dividendFrequency: Optional[str] = None

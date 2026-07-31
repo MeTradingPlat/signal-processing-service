@@ -42,14 +42,23 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
     signal_count = 0
     for symbol, passed_matches in signals.items():
         filtros_nombres = ", ".join([sm.filtro.enumFiltro.name for sm in passed_matches])
-        metadatos_json = json.dumps([
-            {
-                "filtro": sm.filtro.enumFiltro.name,
-                "timeframe": _minutos_to_label(extraer_timeframe_minutos(sm.filtro)),
-                "velaTimestamp": sm.vela_timestamp.replace(tzinfo=None).isoformat(),
-            }
-            for sm in passed_matches
-        ])
+        # "precio" es el de la vela del ULTIMO grupo evaluado (el que de
+        # verdad confirmo la senal, ya que evaluar_tecnicos va reduciendo
+        # candidatos grupo a grupo) -- es el precio mas cercano al momento
+        # real en que la senal se genero. Usado por el frontend para dibujar
+        # una linea horizontal de "precio de entrada simulado" en el grafico.
+        precio_senal = passed_matches[-1].precio if passed_matches else None
+        metadatos_json = json.dumps({
+            "precio": precio_senal,
+            "matches": [
+                {
+                    "filtro": sm.filtro.enumFiltro.name,
+                    "timeframe": _minutos_to_label(extraer_timeframe_minutos(sm.filtro)),
+                    "velaTimestamp": sm.vela_timestamp.replace(tzinfo=None).isoformat(),
+                }
+                for sm in passed_matches
+            ],
+        })
         log_event = {
             "servicioOrigen": settings.servicio_origen,
             "nivel": "INFO",

@@ -7,6 +7,7 @@ from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.scanner.marketdata_client import MarketdataClient
 from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
+from app.scanner.timeframe import bars_necesarias_grupo
 from app.strategies.base import FilterStrategy, MarketData
 
 logger = logging.getLogger(__name__)
@@ -273,7 +274,7 @@ class SymbolPipeline:
             if not candidates:
                 break
             tf_label = _minutos_to_label(minutos)
-            bars_needed = max(150, minutos * 2)
+            bars_needed = bars_necesarias_grupo(filtros, minutos)
             passing, stats = self._evaluar_grupo_tecnico(candidates, filtros, tf_label, bars_needed, matched)
             logger.info(
                 "evaluar_tecnicos %s: %d symbols, %d/%d bars with a null OHLC field",

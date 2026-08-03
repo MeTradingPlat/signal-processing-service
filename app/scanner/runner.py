@@ -52,7 +52,6 @@ def run_scanner(escaner: Escaner):
     )
 
     pipeline.cargar_todos()
-    _clear_old_signals(escaner.idEscaner)
 
     if escaner.objTipoEjecucion.enumTipoEjecucion == EnumTipoEjecucion.UNA_VEZ:
         _run_once(escaner, pipeline)
@@ -102,7 +101,6 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
 
 def _publish_signals(escaner: Escaner, signals: dict, nuevos: set):
     from app.infrastructure.output.kafka_producer import publish_signals as kafka_publish
-    _clear_old_signals(escaner.idEscaner)
     logger.info("SIGNALS: scanner='%s' id=%d count=%d",
                 escaner.nombre, escaner.idEscaner, len(signals))
     kafka_publish(escaner.idEscaner, escaner.nombre, signals, nuevos)

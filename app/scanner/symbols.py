@@ -203,19 +203,14 @@ def categorizar_filtros(filtros: List[Filtro]) -> tuple[List[Filtro], List[Filtr
 
 class SymbolPipeline:
     def __init__(self, escaner: Escaner):
+        self.scanner_id = escaner.idEscaner
         self.mercados = [m.enumMercado.value for m in escaner.mercados]
         self.pre_estaticos, self.pre_dinamicos, self.tecnicos = categorizar_filtros(escaner.filtros)
         self._todos: List[str] = []
         self._filtrados: List[str] = []
         self._client = MarketdataClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
-        # Confirmado en vivo: sin esto, cada simbolo que sigue calificando se
-        # republicaba como "senal nueva" en cada ciclo (~60s), inundando las
-        # notificaciones en vivo con avisos repetidos para los mismos ~70
-        # simbolos. Estado en memoria por proceso -- seguro porque hay un
-        # multiprocessing.Process dedicado por escaner (ver orchestrator/),
-        # sin fan-out entre procesos para la evaluacion. Se pierde en un
-        # redeploy, lo que genera una unica rafaga (no repetida) al arrancar.
+        self._signaled_today: set = set()
         self._previously_matched: set = set()
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
@@ -267,6 +262,7 @@ class SymbolPipeline:
         self._fetch_fundamentals()
         self._aplicar_estaticos()
         self._aplicar_dinamicos()
+        self._excluir_ya_senializados_hoy()
 
     def _aplicar_estaticos(self):
         if not self.pre_estaticos:
@@ -320,6 +316,30 @@ class SymbolPipeline:
                 remaining.append(sym)
         self._filtrados = remaining
         logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(quotes), len(self._filtrados))
+
+    def _excluir_ya_senializados_hoy(self):
+        """Consulta al log-service los simbolos que ya tuvieron senal hoy para
+        este escaner y los saca de _filtrados. Sin esto, el mismo simbolo
+        genera senal en cada ciclo del dia -- el usuario quiere una sola senal
+        por simbolo por dia por escaner. La lista se refresca en cada ciclo
+        para cubrir simbolos que se senializaron en ciclos anteriores de hoy."""
+        if not self._filtrados:
+            return
+        try:
+            import urllib.request, json
+            from app.config import settings
+            url = f"{settings.log_service_url}/logs/escaner/{self.scanner_id}/signaled-today"
+            req = urllib.request.Request(url, headers={"X-Gateway-Passed": "true"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self._signaled_today = set(json.loads(resp.read()))
+            antes = len(self._filtrados)
+            self._filtrados = [s for s in self._filtrados if s not in self._signaled_today]
+            excluidos = antes - len(self._filtrados)
+            if excluidos:
+                logger.info("SymbolPipeline: excluded %d already-signaled-today symbols, %d remain",
+                            excluidos, len(self._filtrados))
+        except Exception as e:
+            logger.warning("SymbolPipeline: signaled-today check failed, proceeding without exclusion: %s", e)
 
     def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[SignalMatch]]:
         candidates = set(self._filtrados)

@@ -59,10 +59,19 @@ jobs:
 
       - name: Run Application Container
         run: |
+          # Cada escaner INICIADO corre en su propio proceso (ver
+          # process_registry en app/orchestrator) -- con varios escaneres
+          # activos a la vez durante su ventana horaria, el consumo de CPU
+          # escala con cuantos esten corriendo simultaneamente. El host
+          # comparte 4 nucleos con historical-data-service + postgres-
+          # historical + marketdata-service (ya topados en 4.0 nucleos entre
+          # los tres) -- mismo techo que a esos, para que un dia con varios
+          # escaneres activos a la vez no le quite CPU al resto.
           docker run -d \
             --name "signal-processing-service" \
             --network "metradingplat-network" \
             --restart "unless-stopped" \
+            --cpus "1.5" \
             --memory "1536m" \
             --memory-swap "1536m" \
             --label project="metradingplat" \

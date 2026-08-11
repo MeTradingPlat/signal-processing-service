@@ -42,6 +42,9 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
     signal_count = 0
     for symbol, passed_matches in signals.items():
         filtros_nombres = ", ".join([sm.filtro.enumFiltro.name for sm in passed_matches])
+        # Sin matches tecnicos (escaner armado solo con pre-filtros, ver
+        # runner.py) "cumple " quedaria colgado sin nada despues.
+        detalle_filtros = f": cumple {filtros_nombres}" if filtros_nombres else ""
         # "precio" es el de la vela del ULTIMO grupo evaluado (el que de
         # verdad confirmo la senal, ya que evaluar_tecnicos va reduciendo
         # candidatos grupo a grupo) -- es el precio mas cercano al momento
@@ -62,7 +65,7 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
         log_event = {
             "servicioOrigen": settings.servicio_origen,
             "nivel": "INFO",
-            "mensaje": f"Señal generada para {symbol} en '{scanner_name}': cumple {filtros_nombres}",
+            "mensaje": f"Señal generada para {symbol} en '{scanner_name}'{detalle_filtros}",
             "idEscaner": scanner_id,
             "symbol": symbol,
             "categoria": "SIGNAL",

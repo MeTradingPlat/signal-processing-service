@@ -89,14 +89,19 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
     logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
     pipeline.aplicar_pre_filtros()
 
-    if pipeline.tecnicos:
-        grupos = agrupar_por_timeframe(pipeline.tecnicos)
-        signals = pipeline.evaluar_tecnicos(grupos)
-        nuevos = pipeline.nuevos_symbols(signals)
-        _publish_signals(escaner, signals, nuevos)
-        if signals:
-            logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
-                        escaner.idEscaner, len(signals), list(signals.keys())[:5])
+    # Antes esto vivia detras de "if pipeline.tecnicos:" -- un escaner armado
+    # solo con pre-filtros (precio/volumen/fundamentales, sin ningun filtro
+    # que necesite velas) nunca llegaba a evaluar_tecnicos ni a publicar,
+    # sin importar cuantos simbolos pasaran los pre-filtros. evaluar_tecnicos
+    # ya maneja bien grupos={} (devuelve los candidatos tal cual, sin
+    # matches tecnicos) -- el problema era que el caller ni lo intentaba.
+    grupos = agrupar_por_timeframe(pipeline.tecnicos)
+    signals = pipeline.evaluar_tecnicos(grupos)
+    nuevos = pipeline.nuevos_symbols(signals)
+    _publish_signals(escaner, signals, nuevos)
+    if signals:
+        logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
+                    escaner.idEscaner, len(signals), list(signals.keys())[:5])
 
 
 def _publish_signals(escaner: Escaner, signals: dict, nuevos: set):

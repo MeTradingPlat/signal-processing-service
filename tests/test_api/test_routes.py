@@ -52,3 +52,14 @@ def test_health_returns_up():
 
     assert response.status_code == 200
     assert response.json()["status"] == "UP"
+
+
+def test_calendar_estado_returns_trading_day_info():
+    client, _ = make_client()
+
+    response = client.get("/signal-processing/calendar/estado")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["hoyEsDiaHabil"], bool)
+    assert len(body["proximoDiaHabil"]) == 10  # YYYY-MM-DD

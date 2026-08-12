@@ -48,6 +48,28 @@ def test_una_vez_scanner_completes_when_hora_fin_passed():
     _run_once(escaner, _now=now)
 
 
+def test_una_vez_scanner_resumes_immediately_when_restarted_mid_window():
+    # Regresion: un reinicio del proceso (o del escaner) a mitad de su
+    # propia ventana activa saltaba directo a next_trading_window(), que
+    # solo busca la PROXIMA ocurrencia futura de horaInicio -- como la de
+    # hoy ya paso, se dormia hasta MANANA y perdia el resto de la ventana
+    # de hoy sin ningun error visible (confirmado en vivo con "test 33").
+    now = datetime(2026, 7, 17, 9, 45, 0, tzinfo=timezone.utc)
+    escaner = Escaner(
+        idEscaner=3,
+        nombre="test-mid-window-restart",
+        horaInicio=time(9, 30, 0),
+        horaFin=time(10, 0, 0),
+        objEstado=EstadoEscaner(enumEstadoEscaner=EnumEstadoEscaner.INICIADO),
+        objTipoEjecucion=TipoEjecucion(enumTipoEjecucion=EnumTipoEjecucion.UNA_VEZ),
+    )
+
+    with patch("app.scanner.runner.next_trading_window") as mock_next_window:
+        _run_once(escaner, _now=now)
+
+    mock_next_window.assert_not_called()
+
+
 def test_una_vez_registry_detects_completion():
     registry = ProcessRegistry()
 

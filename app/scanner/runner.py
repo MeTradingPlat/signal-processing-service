@@ -54,7 +54,7 @@ def run_scanner(escaner: Escaner):
     pipeline.cargar_todos()
 
     if escaner.objTipoEjecucion.enumTipoEjecucion == EnumTipoEjecucion.UNA_VEZ:
-        _run_once(escaner, pipeline)
+        _run_once(escaner, pipeline=pipeline)
     else:
         _run_daily(escaner, pipeline, orchestrator_pid)
 

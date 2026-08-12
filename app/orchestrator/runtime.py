@@ -55,7 +55,9 @@ def _sync_active_scanners(registry: ProcessRegistry):
 def _check_completed(registry: ProcessRegistry):
     completed = registry.collect_completed()
     for scanner_id in completed:
-        from app.adapters.scanner_management_client import ScannerManagementClient
-        ScannerManagementClient().notify_scanner_stopped(scanner_id)
+        # publish_scanner_completed() ya notifica a scanner-management-service
+        # (ver runner_completion.py) -- llamarlo tambien aca duplicaba la
+        # notificacion y la segunda siempre fallaba con 400 porque el escaner
+        # ya habia quedado DETENIDO por la primera.
         publish_scanner_completed(scanner_id)
 

@@ -64,8 +64,10 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
         pipeline = SymbolPipeline(escaner)
         pipeline.cargar_todos()
     now = _now or datetime.now(timezone.utc)
-    window_start = next_trading_window(escaner.horaInicio, now)
-    _sleep_until(window_start, _now)
+    end = effective_end(escaner.horaFin, now.date())
+    if not is_within_window(now, escaner.horaInicio, end):
+        window_start = next_trading_window(escaner.horaInicio, now)
+        _sleep_until(window_start, _now)
 
     logger.info("ScannerRunner: UNA_VEZ active id=%d", escaner.idEscaner)
     _run_loop_until_end(escaner, pipeline, _now)

@@ -72,8 +72,8 @@ jobs:
             --network "metradingplat-network" \
             --restart "unless-stopped" \
             --cpus "1.5" \
-            --memory "1536m" \
-            --memory-swap "1536m" \
+            --memory "2048m" \
+            --memory-swap "2048m" \
             --label project="metradingplat" \
             --label service="signal-processing-service" \
             -e SP_SCANNER_MANAGEMENT_URL="http://scanner-management-service:8081" \

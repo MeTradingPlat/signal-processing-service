@@ -108,8 +108,13 @@ class _PassthroughStrategy(FilterStrategy):
 # Tamano de lote y concurrencia para evaluar_tecnicos -- ver
 # _evaluar_grupo_tecnico para el porque (acotar memoria sin perder el
 # paralelismo que marketdata-service ya hace internamente por conexion).
+# Bajado de 4 a 2 workers: un escaner sin pre-filtros configurados evalua el
+# universo completo (~8800 simbolos) en cada temporalidad tecnica, en cada
+# ciclo (~70s) -- confirmado en vivo que eso, con 4 lotes de 700 en vuelo a
+# la vez, tumbaba el contenedor por OOM cada vez (SIGKILL, sin traceback,
+# el proceso simplemente desaparecia a mitad de ciclo).
 _CANDLE_CHUNK_SIZE = 700
-_CANDLE_CHUNK_WORKERS = 4
+_CANDLE_CHUNK_WORKERS = 2
 
 _STATIC_PRE: set[EnumCategoriaFiltro] = {
     EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,

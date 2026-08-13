@@ -408,6 +408,18 @@ class SymbolPipeline:
                     candles_map = future.result()
                     symbols_with_data += len(candles_map)
                     for sym, candles in candles_map.items():
+                        if sym not in matched:
+                            # marketdata-service a veces devuelve un simbolo que
+                            # no estaba en el lote pedido (ej. una serie de
+                            # preferentes emparentada, visto en vivo con
+                            # COF -> COFPN) -- confiar en esa clave tumbaba el
+                            # escaner entero con un KeyError. No es un
+                            # candidato que pedimos evaluar, se descarta.
+                            logger.warning(
+                                "evaluar_tecnicos %s: marketdata devolvio simbolo no pedido '%s', descartado",
+                                tf_label, sym,
+                            )
+                            continue
                         total_bars += len(candles)
                         null_bars += sum(
                             1 for c in candles

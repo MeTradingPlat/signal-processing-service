@@ -395,29 +395,37 @@ class SymbolPipeline:
         null_bars = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=_CANDLE_CHUNK_WORKERS) as executor:
-            futures = [executor.submit(fetch_chunk, chunk) for chunk in chunks]
-            for future in concurrent.futures.as_completed(futures):
-                candles_map = future.result()
-                symbols_with_data += len(candles_map)
-                for sym, candles in candles_map.items():
-                    total_bars += len(candles)
-                    null_bars += sum(
-                        1 for c in candles
-                        if c.open is None or c.high is None or c.low is None or c.close is None
-                    )
-                    if not candles:
-                        continue
-                    fund = self._fundamentals.get(sym)
-                    data = _make_marketdata(sym, fund, candles, None)
-                    sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
-                    if len(sym_matches) == len(filtros):
-                        vela_timestamp = candles[-1].timestamp
-                        precio = candles[-1].close
-                        matched[sym].extend(
-                            SignalMatch(filtro=f, vela_timestamp=vela_timestamp, precio=precio)
-                            for f in sym_matches
+            pending = {executor.submit(fetch_chunk, chunk) for chunk in chunks}
+            # as_completed(futures) NO suelta cada Future al procesarlo -- el
+            # objeto (con las velas ya parseadas adentro) se queda vivo en la
+            # lista `futures` hasta que la funcion entera termina, aunque ya
+            # se haya leido su .result(). Con wait()+reasignar `pending` en
+            # cada vuelta, los lotes ya procesados si quedan sin referencias y
+            # se pueden liberar de a uno, que era la intencion original.
+            while pending:
+                done, pending = concurrent.futures.wait(pending, return_when=concurrent.futures.FIRST_COMPLETED)
+                for future in done:
+                    candles_map = future.result()
+                    symbols_with_data += len(candles_map)
+                    for sym, candles in candles_map.items():
+                        total_bars += len(candles)
+                        null_bars += sum(
+                            1 for c in candles
+                            if c.open is None or c.high is None or c.low is None or c.close is None
                         )
-                        passing.add(sym)
+                        if not candles:
+                            continue
+                        fund = self._fundamentals.get(sym)
+                        data = _make_marketdata(sym, fund, candles, None)
+                        sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]
+                        if len(sym_matches) == len(filtros):
+                            vela_timestamp = candles[-1].timestamp
+                            precio = candles[-1].close
+                            matched[sym].extend(
+                                SignalMatch(filtro=f, vela_timestamp=vela_timestamp, precio=precio)
+                                for f in sym_matches
+                            )
+                            passing.add(sym)
 
         return passing, (symbols_with_data, null_bars, total_bars)
 

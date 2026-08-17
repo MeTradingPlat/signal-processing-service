@@ -91,15 +91,6 @@ class MarketdataClient:
             result.update({k: [CandleResponse(**c) for c in v] for k, v in raw.items()})
         return result
 
-    def fetch_candles_current(
-        self, symbols: List[str], timeframe: str
-    ) -> dict[str, CandleResponse]:
-        tf = timeframe_to_marketdata(timeframe)
-        data = self._request("POST", "/marketdata/historical/batch/current",
-                             body={"symbols": symbols, "timeframe": tf}, timeout=90)
-        raw = data.get("candlePorSimbolo", {})
-        return {k: CandleResponse(**v) for k, v in raw.items() if v}
-
     def fetch_quotes(self, symbols: List[str]) -> dict[str, float]:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 

@@ -27,11 +27,39 @@ class MarketdataClient:
     def _headers(self) -> dict:
         return {"Content-Type": "application/json", "X-Gateway-Passed": "true"}
 
+    # Cuanto espera entre reintentos cuando marketdata esta en refill
+    # (503 MAINTENANCE) -- el refill dura ~20-40 min, reintentar cada 60s
+    # mantiene la espera sin martillar la API.
+    _MAINTENANCE_RETRY_SECONDS = 60
+    _MAINTENANCE_MAX_ATTEMPTS = 60
+
     def _request(self, method: str, path: str, body: Optional[dict] = None, timeout: int = 30) -> dict:
+        import time
+
         data = json.dumps(body).encode() if body else None
         req = urllib.request.Request(f"{self._base}{path}", data=data, headers=self._headers(), method=method)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read())
+        for attempt in range(1, self._MAINTENANCE_MAX_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                # El marketdata-service responde 503 con {"code": "MAINTENANCE",
+                # "message": ...} durante el refill -- esperar con backoff
+                # largo en vez de fallar o martillar.
+                if e.code == 503:
+                    try:
+                        body_resp = json.loads(e.read().decode())
+                        if body_resp.get("code") == "MAINTENANCE":
+                            logger.warning(
+                                "marketdata en mantenimiento (refill), reintento %d/%d en %ds",
+                                attempt, self._MAINTENANCE_MAX_ATTEMPTS, self._MAINTENANCE_RETRY_SECONDS,
+                            )
+                            time.sleep(self._MAINTENANCE_RETRY_SECONDS)
+                            continue
+                    except json.JSONDecodeError:
+                        pass
+                raise
+        raise RuntimeError(f"marketdata sigue en mantenimiento tras {self._MAINTENANCE_MAX_ATTEMPTS} intentos")
 
     def is_ready(self) -> bool:
         try:

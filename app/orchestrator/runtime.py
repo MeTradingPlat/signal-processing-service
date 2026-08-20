@@ -25,7 +25,18 @@ def run_orchestrator(connection: Connection):
             message = receiver.poll(_POLL_SECONDS)
             if message is not None:
                 logger.info("Orchestrator: received event type='%s'", message.type)
-                dispatcher.dispatch(message)
+                # Una excepcion sin atajar aca (ej. Process().start() bajo
+                # presion de memoria, o un payload que falla el
+                # model_validate de Dispatcher._parse_payload) caia al
+                # finally de abajo -- registry.shutdown_all() termina TODOS
+                # los escaneres activos, no solo el evento que fallo, y
+                # de paso mata al orquestador entero por un solo evento
+                # malo. Atajar aca y seguir el loop deja el resto de
+                # escaneres corriendo.
+                try:
+                    dispatcher.dispatch(message)
+                except Exception:
+                    logger.exception("Orchestrator: unhandled error dispatching event type='%s'", message.type)
             _check_completed(registry)
     except EOFError:
         logger.info("Orchestrator: pipe closed, shutting down")

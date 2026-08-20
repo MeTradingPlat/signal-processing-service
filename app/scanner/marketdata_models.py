@@ -16,10 +16,16 @@ class CandleResponse(BaseModel):
     impVolatility: Optional[float] = None
 
 
-class QuoteResponse(BaseModel):
+class PriceSnapshot(BaseModel):
+    """Current price + today's OHLC for a symbol, as assembled per-cycle by
+    SymbolPipeline (last trade + fields borrowed from FundamentalResponse) --
+    NOT a live bid/ask quote from DxLink. There is no bid/ask field on
+    purpose: no strategy uses one today, and a real Level 1 quote stream
+    isn't wired up. A filter that needs a real bid/ask spread will fail
+    loudly against this model instead of silently reading an always-None
+    field."""
+
     symbol: str
-    bid: Optional[float] = None
-    ask: Optional[float] = None
     last: Optional[float] = None
     open: Optional[float] = None
     high: Optional[float] = None

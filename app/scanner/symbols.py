@@ -8,7 +8,7 @@ from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
 from app.scanner.marketdata_client import MarketdataClient
-from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
+from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
 from app.scanner.timeframe import bars_necesarias_grupo
 from app.strategies.base import FilterStrategy, MarketData
 
@@ -22,9 +22,9 @@ def _make_marketdata(
     symbol: str,
     fund: Optional[FundamentalResponse] = None,
     candles: Optional[List[CandleResponse]] = None,
-    quote: Optional[QuoteResponse] = None,
+    snapshot: Optional[PriceSnapshot] = None,
 ) -> MarketData:
-    return MarketData(symbol=symbol, fundamental=fund, candles=candles, quote=quote)
+    return MarketData(symbol=symbol, fundamental=fund, candles=candles, snapshot=snapshot)
 
 
 def _get_strategy(filtro: Filtro) -> FilterStrategy:
@@ -302,21 +302,21 @@ class SymbolPipeline:
             if price is None:
                 continue
             fund = self._fundamentals.get(sym)
-            quote = QuoteResponse(
+            snapshot = PriceSnapshot(
                 symbol=sym,
                 last=price,
                 # VOLUME/POSITION_IN_RANGE/PERCENTAGE_RANGE/RANGE_DOLLARS/CHANGE
-                # necesitan volumen y rango del dia, que el quote ligero no trae
-                # por si solo -- pero ya estan en fund (REST, ya en memoria de
-                # _fetch_fundamentals), asi que se copian aca en vez de pedir
-                # nada nuevo.
+                # necesitan volumen y rango del dia, que el snapshot ligero no
+                # trae por si solo -- pero ya estan en fund (REST, ya en
+                # memoria de _fetch_fundamentals), asi que se copian aca en
+                # vez de pedir nada nuevo.
                 volume=fund.dayVolume if fund else None,
                 open=fund.open if fund else None,
                 high=fund.high if fund else None,
                 low=fund.low if fund else None,
                 prevClose=fund.prevClose if fund else None,
             )
-            data = _make_marketdata(sym, fund, None, quote)
+            data = _make_marketdata(sym, fund, None, snapshot)
             if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
                 remaining.append(sym)
         self._filtrados = remaining

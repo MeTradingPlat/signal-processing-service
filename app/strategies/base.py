@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from app.models.filtro import Filtro
 from app.models.valor import ValorCondicional, ValorFloat, ValorInteger, ValorString
-from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
+from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
 from app.strategies.condition import evaluate_condition
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MarketData:
     symbol: str
-    quote: QuoteResponse | None = None
+    snapshot: PriceSnapshot | None = None
     candles: list[CandleResponse] | None = None
     fundamental: FundamentalResponse | None = None
 

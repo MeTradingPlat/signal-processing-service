@@ -36,7 +36,18 @@ def market_close_time(check_date: date) -> time:
 
 
 def effective_end(escaner_end: time, check_date: date) -> time:
-    return escaner_end
+    # market_close_time() esta implementada y probada pero nadie la llamaba
+    # -- en un dia de _EARLY_CLOSE_DATES, un escaner configurado hasta el
+    # cierre extendido normal (ej. 20:00, o cualquier hora que el usuario
+    # elija -- un dia normal se respeta tal cual, horas extendidas
+    # incluidas) seguia evaluando horas despues del cierre real (17:00),
+    # contra un mercado que ya no imprime velas nuevas. Solo se recorta en
+    # los dias especiales; min() tambien respeta un horaFin mas TEMPRANO
+    # que el cierre anticipado (alguien que solo quiere escanear hasta las
+    # 14:00 no debe extenderse a las 17:00).
+    if check_date not in _EARLY_CLOSE_DATES:
+        return escaner_end
+    return min(escaner_end, market_close_time(check_date))
 
 
 def is_trading_day(check_date: date) -> bool:

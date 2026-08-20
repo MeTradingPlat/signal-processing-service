@@ -115,7 +115,10 @@ def agrupar_por_timeframe(filtros: list[Filtro]) -> dict[int, list[Filtro]]:
 def _leer_periodo(filtro: Filtro, param_enum: EnumParametro, default: int) -> int:
     for p in filtro.parametros:
         if p.enumParametro == param_enum and isinstance(p.objValorSeleccionado, ValorInteger):
-            return p.objValorSeleccionado.valor or default
+            valor = p.objValorSeleccionado.valor
+            # "or default" trata un 0 configurado igual que "nunca se
+            # configuro" -- ver el mismo fix en strategies/base.py.
+            return valor if valor is not None else default
     return default
 
 

@@ -129,7 +129,7 @@ class MarketdataClient:
             result.update({k: [CandleResponse(**c) for c in v] for k, v in raw.items()})
         return result
 
-    def fetch_quotes(self, symbols: List[str]) -> dict[str, float]:
+    def fetch_current_prices(self, symbols: List[str]) -> dict[str, float]:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         chunk_size = 100

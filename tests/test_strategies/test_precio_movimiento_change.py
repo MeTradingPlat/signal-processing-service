@@ -3,7 +3,7 @@ from app.models.filtro import Filtro, Parametro
 from app.models.valor import ValorString
 from app.scanner.marketdata_models import FundamentalResponse, QuoteResponse
 from app.strategies.base import MarketData
-from app.strategies.precio_movimiento import ChangeStrategy
+from app.strategies.precio_movimiento import ChangeStrategy, GapFromCloseStrategy
 
 
 def _filtro(punto_referencia: str) -> Filtro:
@@ -44,3 +44,32 @@ def test_close_pre_market_without_data_returns_none_not_wrong_value():
 def test_close_post_market_without_data_returns_none_not_wrong_value():
     data = _data()
     assert ChangeStrategy(_filtro("CLOSE_POST_MARKET")).compute_value(data) is None
+
+
+def _gap_filtro() -> Filtro:
+    return Filtro(enumFiltro=EnumFiltro.GAP_FROM_CLOSE, parametros=[])
+
+
+def test_gap_from_close_falls_back_to_premarket_when_regular_open_unset():
+    # marketdata-service reports quote.open=0.0 (not null) before 9:30 ET --
+    # gap must use the premarket last trade instead of computing against a
+    # phantom $0 open (which used to yield a constant -100%).
+    quote = QuoteResponse(symbol="AAPL", open=0.0, prevClose=100.0)
+    fund = FundamentalResponse(symbol="AAPL", preMarketClose=103.0)
+    data = MarketData(symbol="AAPL", quote=quote, fundamental=fund)
+    value = GapFromCloseStrategy(_gap_filtro()).compute_value(data)
+    assert value == 3.0
+
+
+def test_gap_from_close_without_any_open_returns_none():
+    quote = QuoteResponse(symbol="AAPL", open=0.0, prevClose=100.0)
+    data = MarketData(symbol="AAPL", quote=quote, fundamental=None)
+    assert GapFromCloseStrategy(_gap_filtro()).compute_value(data) is None
+
+
+def test_gap_from_close_prefers_regular_open_once_available():
+    quote = QuoteResponse(symbol="AAPL", open=105.0, prevClose=100.0)
+    fund = FundamentalResponse(symbol="AAPL", preMarketClose=999.0)
+    data = MarketData(symbol="AAPL", quote=quote, fundamental=fund)
+    value = GapFromCloseStrategy(_gap_filtro()).compute_value(data)
+    assert value == 5.0

@@ -8,6 +8,8 @@ from app.scanner.timeframe import extraer_timeframe_minutos
 
 logger = logging.getLogger(__name__)
 
+_FLUSH_TIMEOUT_SECONDS = 10
+
 _producer = None
 
 
@@ -82,7 +84,16 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
             logger.error("Failed to publish signal for %s: %s", symbol, e)
 
     if producer and producer is not False:
-        producer.flush()
+        # timeout explicito -- flush(timeout=None) espera indefinido a que
+        # el broker confirme, y un cuelgue de red (no un rechazo limpio,
+        # que fallaria rapido) congelaba el proceso del escaner entero para
+        # siempre, sin log ni forma de recuperarse (el ciclo nunca vuelve a
+        # correr). Un timeout vencido no debe tumbar el ciclo -- las señales
+        # ya se intentaron enviar arriba, solo falta la confirmacion.
+        try:
+            producer.flush(timeout=_FLUSH_TIMEOUT_SECONDS)
+        except Exception as e:
+            logger.error("Kafka flush failed or timed out: %s", e)
 
     logger.info("SIGNALS: scanner='%s' count=%d", scanner_name, signal_count)
 

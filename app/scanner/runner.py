@@ -54,12 +54,13 @@ def run_scanner(escaner: Escaner):
     pipeline.cargar_todos()
 
     if escaner.objTipoEjecucion.enumTipoEjecucion == EnumTipoEjecucion.UNA_VEZ:
-        _run_once(escaner, pipeline=pipeline)
+        _run_once(escaner, pipeline=pipeline, orchestrator_pid=orchestrator_pid)
     else:
         _run_daily(escaner, pipeline, orchestrator_pid)
 
 
-def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPipeline | None = None):
+def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPipeline | None = None,
+              orchestrator_pid: int | None = None):
     if pipeline is None:
         pipeline = SymbolPipeline(escaner)
         pipeline.cargar_todos()
@@ -70,7 +71,7 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
         _sleep_until(window_start, _now)
 
     logger.info("ScannerRunner: UNA_VEZ active id=%d", escaner.idEscaner)
-    _run_loop_until_end(escaner, pipeline, _now)
+    _run_loop_until_end(escaner, pipeline, _now, orchestrator_pid)
 
     logger.info("ScannerRunner: UNA_VEZ completed id=%d", escaner.idEscaner)
 
@@ -162,8 +163,18 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
         logger.info("ScannerRunner: interrupted id=%d", escaner.idEscaner)
 
 
-def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: datetime | None = None):
+def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: datetime | None = None,
+                         orchestrator_pid: int | None = None):
     while True:
+        # Mismo chequeo que _run_daily -- sin esto, un escaner UNA_VEZ
+        # sobrevive a la muerte del orquestador (que restaura su propio
+        # escaner via _sync_active_scanners al reiniciar) y queda un
+        # proceso huerfano duplicando señales el resto de su ventana.
+        # orchestrator_pid es None en los tests (mismo criterio que _now),
+        # asi que no cambia su comportamiento.
+        if orchestrator_pid is not None and os.getppid() != orchestrator_pid:
+            logger.warning("ScannerRunner: orchestrator died id=%d", escaner.idEscaner)
+            return
         now = _now or datetime.now(timezone.utc)
         end = effective_end(escaner.horaFin, now.date())
         if now.time() >= end or not is_within_window(now, escaner.horaInicio, end):

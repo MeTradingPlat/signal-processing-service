@@ -18,6 +18,7 @@ class EnumMercado(str, Enum):
     NASDAQ = "NASDAQ"
     AMEX = "AMEX"
     ETF = "ETF"
+    BATS = "BATS"
     OTC = "OTC"
 
 

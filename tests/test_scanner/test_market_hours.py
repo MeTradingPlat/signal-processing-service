@@ -1,6 +1,6 @@
 from datetime import date, time
 
-from app.scanner.calendar import effective_end, market_close_time
+from app.scanner.calendar import effective_end, effective_start, market_close_time
 
 
 def test_regular_close_time():
@@ -33,3 +33,18 @@ def test_effective_end_caps_at_early_close():
 def test_effective_end_respects_earlier_hora_fin_on_early_close_day():
     result = effective_end(time(14, 0, 0), date(2026, 7, 3))
     assert result == time(14, 0, 0)
+
+
+def test_effective_start_caps_dead_overnight_hours():
+    result = effective_start(time(21, 0, 0))
+    assert result == time(4, 0, 0)
+
+
+def test_effective_start_respects_later_hora_inicio():
+    result = effective_start(time(9, 30, 0))
+    assert result == time(9, 30, 0)
+
+
+def test_effective_start_caps_early_morning_dead_hours():
+    result = effective_start(time(2, 0, 0))
+    assert result == time(4, 0, 0)

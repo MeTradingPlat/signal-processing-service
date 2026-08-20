@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.models.enums import EnumTipoEjecucion
 from app.models.escaner import Escaner
 from app.models.filtro import Filtro
-from app.scanner.calendar import effective_end, is_within_window, next_trading_window
+from app.scanner.calendar import effective_end, effective_start, is_within_window, next_trading_window
 from app.scanner.symbols import SymbolPipeline
 from app.scanner.timeframe import agrupar_por_timeframe
 
@@ -65,9 +65,10 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
         pipeline = SymbolPipeline(escaner)
         pipeline.cargar_todos()
     now = _now or datetime.now(timezone.utc)
+    start = effective_start(escaner.horaInicio)
     end = effective_end(escaner.horaFin, now.date())
-    if not is_within_window(now, escaner.horaInicio, end):
-        window_start = next_trading_window(escaner.horaInicio, now)
+    if not is_within_window(now, start, end):
+        window_start = next_trading_window(start, now)
         _sleep_until(window_start, _now)
 
     logger.info("ScannerRunner: UNA_VEZ active id=%d", escaner.idEscaner)
@@ -127,6 +128,10 @@ def _clear_old_signals(scanner_id: int):
 
 
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):
+    # effective_start no depende de la fecha (a diferencia de effective_end,
+    # que si cambia en dias de cierre anticipado) -- se calcula una sola vez
+    # fuera del loop.
+    start = effective_start(escaner.horaInicio)
     last_date = None
     try:
         while True:
@@ -135,7 +140,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                 return
             now = datetime.now(timezone.utc)
             end = effective_end(escaner.horaFin, now.date())
-            if is_within_window(now, escaner.horaInicio, end):
+            if is_within_window(now, start, end):
                 if last_date != now.date():
                     if last_date is not None:
                         pipeline.renovar_si_nuevo_dia()
@@ -150,7 +155,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     # "ACTIVO" toda la noche hasta el primer ciclo de manana.
                     _publish_signals(escaner, {}, set())
                 last_date = None
-                next_run = next_trading_window(escaner.horaInicio, now)
+                next_run = next_trading_window(start, now)
                 wait = (next_run - now).total_seconds()
                 logger.info(
                     "ScannerRunner: sleeping id=%d until %s (%.0f min)",
@@ -176,8 +181,9 @@ def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: dateti
             logger.warning("ScannerRunner: orchestrator died id=%d", escaner.idEscaner)
             return
         now = _now or datetime.now(timezone.utc)
+        start = effective_start(escaner.horaInicio)
         end = effective_end(escaner.horaFin, now.date())
-        if now.time() >= end or not is_within_window(now, escaner.horaInicio, end):
+        if now.time() >= end or not is_within_window(now, start, end):
             return
         _reintentar_carga_si_vacia(pipeline)
         _do_cycle(escaner, pipeline)

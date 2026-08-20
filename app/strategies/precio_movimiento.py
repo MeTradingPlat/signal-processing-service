@@ -35,7 +35,7 @@ class ChangeStrategy(FilterStrategy):
         reference = None
         if ref == "OPEN":
             reference = data.quote.open if data.quote else None
-            if reference is None and data.fundamental:
+            if not reference and data.fundamental:
                 reference = data.fundamental.open
         elif ref == "CLOSE":
             reference = data.quote.prevClose if data.quote else None
@@ -66,19 +66,27 @@ class PercentageChangeStrategy(FilterStrategy):
 
 
 class GapFromCloseStrategy(FilterStrategy):
-    """Gap between current open and previous close, in % or price."""
+    """Gap between current price and previous close, in % or price.
+
+    "Current price" prefers today's regular-session open once it exists, but
+    before 9:30 ET marketdata-service reports it as 0 (IntradaySnapshot.Open
+    is a bare float64, not a pointer -- it only gets set once a regular-
+    session M1 candle closes), not null. `current_open is None` never caught
+    that, so every premarket scan computed gap against a phantom $0 open
+    (-100% every time) instead of falling back -- a "Gap and Go" filter run
+    in premarket could never fire. Falls back through fundamentals and
+    finally to the premarket last trade, which is what "gap" means to a
+    trader scanning before the open."""
 
     def compute_value(self, data: MarketData) -> float | None:
         formato = self._param_str(EnumParametro.FORMATO_GAP_FROM_CLOSE, "PORCENTAJE")
-        current_open = None
-        prev_close = None
-        if data.quote:
-            current_open = data.quote.open
-            prev_close = data.quote.prevClose
-        if current_open is None and data.fundamental:
-            current_open = data.fundamental.open
+        current_open = data.quote.open if data.quote else None
+        prev_close = data.quote.prevClose if data.quote else None
+        if not current_open and data.fundamental:
+            current_open = data.fundamental.open or data.fundamental.preMarketClose
+        if prev_close is None and data.fundamental:
             prev_close = data.fundamental.prevClose
-        if current_open is None or prev_close is None or prev_close <= 0:
+        if not current_open or prev_close is None or prev_close <= 0:
             return None
         gap = current_open - prev_close
         return (gap / prev_close) * 100.0 if formato == "PORCENTAJE" else gap

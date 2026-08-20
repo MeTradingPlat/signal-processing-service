@@ -289,16 +289,16 @@ class SymbolPipeline:
         if not self.pre_dinamicos:
             return
         try:
-            quotes = self._client.fetch_quotes(self._filtrados)
+            prices = self._client.fetch_current_prices(self._filtrados)
         except Exception as e:
-            logger.error("Failed to fetch quotes, keeping previous filtered set: %s", e)
+            logger.error("Failed to fetch current prices, keeping previous filtered set: %s", e)
             return
-        if not quotes:
-            logger.warning("Dynamic filters: no quote data, keeping previous filtered set")
+        if not prices:
+            logger.warning("Dynamic filters: no price data, keeping previous filtered set")
             return
         remaining = []
         for sym in self._filtrados:
-            price = quotes.get(sym)
+            price = prices.get(sym)
             if price is None:
                 continue
             fund = self._fundamentals.get(sym)

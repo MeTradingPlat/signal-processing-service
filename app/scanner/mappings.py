@@ -6,6 +6,11 @@ _MERCADO_TO_MIC: dict[str, str] = {
     EnumMercado.NYSE.value: "XNYS",
     EnumMercado.AMEX.value: "XASE",
     EnumMercado.ETF.value: "ARCX",
+    # BATS (Cboe BZX) es una bolsa real y distinta de ARCX (NYSE Arca) --
+    # ambas listan sobre todo ETFs, pero ETF aca solo mapeaba a ARCX,
+    # dejando los ~1600 simbolos de Cboe BZX (incluido MSTU) invisibles
+    # para cualquier escaner sin ninguna forma de seleccionarlos.
+    EnumMercado.BATS.value: "BATS",
     EnumMercado.OTC.value: "OTC",
 }
 

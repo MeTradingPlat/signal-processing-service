@@ -47,13 +47,19 @@ class FilterStrategy(ABC):
     def _param_int(self, enum_parametro, default: int) -> int:
         for p in self.filtro.parametros:
             if p.enumParametro == enum_parametro and isinstance(p.objValorSeleccionado, ValorInteger):
-                return p.objValorSeleccionado.valor or default
+                valor = p.objValorSeleccionado.valor
+                # "or default" trataba un 0 configurado a proposito (ej.
+                # PROPORCION_VOLUMEN_VOLUME_SPIKE=0, "cualquier volumen ya
+                # es spike") igual que "nunca se configuro" -- el usuario
+                # perdia su valor real en silencio, sin error ni log.
+                return valor if valor is not None else default
         return default
 
     def _param_float(self, enum_parametro, default: float) -> float:
         for p in self.filtro.parametros:
             if p.enumParametro == enum_parametro and isinstance(p.objValorSeleccionado, ValorFloat):
-                return p.objValorSeleccionado.valor or default
+                valor = p.objValorSeleccionado.valor
+                return valor if valor is not None else default
         return default
 
     def _param_str(self, enum_parametro, default: str) -> str:

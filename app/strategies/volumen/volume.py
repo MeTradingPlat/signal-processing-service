@@ -13,8 +13,8 @@ class VolumeStrategy(FilterStrategy):
             if data.fundamental and data.fundamental.preMarketVolume is not None:
                 return data.fundamental.preMarketVolume
             return None
-        if data.quote and data.quote.volume is not None:
-            return data.quote.volume
+        if data.snapshot and data.snapshot.volume is not None:
+            return data.snapshot.volume
         if data.candles and data.candles[-1].volume is not None:
             return data.candles[-1].volume
         return None

@@ -8,7 +8,7 @@ from app.models.enums import EnumCondicional, EnumParametro
 from app.models.filtro import Filtro
 from app.models.parametro import Parametro
 from app.models.valor import ValorCondicional, ValorFloat, ValorInteger, ValorString
-from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
+from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
 from app.strategies.base import MarketData
 from app.strategies.condition import evaluate_condition
 
@@ -18,16 +18,16 @@ def _make_fund(**kw) -> FundamentalResponse:
     return FundamentalResponse(symbol="TEST", **kw)
 
 
-def _make_quote(**kw) -> QuoteResponse:
-    return QuoteResponse(symbol="TEST", **kw)
+def _make_snapshot(**kw) -> PriceSnapshot:
+    return PriceSnapshot(symbol="TEST", **kw)
 
 
 def _make_candle(**kw) -> CandleResponse:
     return CandleResponse(symbol="TEST", **kw)
 
 
-def _make_marketdata(fund=None, quote=None, candles=None) -> MarketData:
-    return MarketData(symbol="TEST", fundamental=fund, quote=quote, candles=candles)
+def _make_marketdata(fund=None, snapshot=None, candles=None) -> MarketData:
+    return MarketData(symbol="TEST", fundamental=fund, snapshot=snapshot, candles=candles)
 
 
 def _strategy(cls, **params):
@@ -67,8 +67,8 @@ AAPL_FUND = _make_fund(
 )
 
 
-AAPL_QUOTE = _make_quote(
-    last=327.74, bid=327.37, ask=327.40, open=323.13,
+AAPL_SNAPSHOT = _make_snapshot(
+    last=327.74, open=323.13,
     high=329.60, low=322.22, prevClose=326.59, volume=41_349_908,
     tradingHalted=False,
 )
@@ -159,7 +159,7 @@ def test_precio_movimiento():
         PositionInRangeStrategy, PercentageRangeStrategy, RangeDollarsStrategy,
         HaltStrategy,
     )
-    data = _make_marketdata(quote=AAPL_QUOTE, fund=AAPL_FUND)
+    data = _make_marketdata(snapshot=AAPL_SNAPSHOT, fund=AAPL_FUND)
 
     ok = True
     # Precio: last price
@@ -273,7 +273,7 @@ def test_filter_evaluation():
 
     from app.models.enums import EnumFiltro
     # Test a filter with condition: PRECIO > 300
-    data = _make_marketdata(quote=AAPL_QUOTE)
+    data = _make_marketdata(snapshot=AAPL_SNAPSHOT)
     f = Filtro(enumFiltro=EnumFiltro.PRECIO)
     f.parametros = [
         Parametro(
@@ -286,7 +286,7 @@ def test_filter_evaluation():
 
     class TestPrecioStrategy(FilterStrategy):
         def compute_value(self, data: MarketData) -> float:
-            return data.quote.last or 0.0
+            return data.snapshot.last or 0.0
 
     s = TestPrecioStrategy(f)
     assert s.evaluate(data)  # 327.74 > 300 = True

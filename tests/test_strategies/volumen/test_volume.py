@@ -1,12 +1,12 @@
 from app.models.enums import EnumCondicional, EnumFiltro, EnumParametro, EnumTipoValor
 from app.models.filtro import Filtro, Parametro
 from app.models.valor import ValorCondicional
-from app.scanner.marketdata_models import QuoteResponse
+from app.scanner.marketdata_models import PriceSnapshot
 from app.strategies.base import MarketData
 from app.strategies.volumen.volume import VolumeStrategy
 
 
-def test_volume_from_quote():
+def test_volume_from_snapshot():
     filtro = Filtro(
         enumFiltro=EnumFiltro.VOLUME,
         parametros=[
@@ -22,5 +22,5 @@ def test_volume_from_quote():
         ],
     )
     strategy = VolumeStrategy(filtro)
-    data = MarketData(symbol="AAPL", quote=QuoteResponse(symbol="AAPL", volume=200000.0))
+    data = MarketData(symbol="AAPL", snapshot=PriceSnapshot(symbol="AAPL", volume=200000.0))
     assert strategy.evaluate(data)

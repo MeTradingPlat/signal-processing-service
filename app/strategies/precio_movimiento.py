@@ -1,5 +1,5 @@
 from app.models.enums import EnumParametro
-from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
+from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
 from app.strategies.base import FilterStrategy, MarketData
 from app.strategies.patrones import _todays_candles
 
@@ -8,8 +8,8 @@ class PrecioStrategy(FilterStrategy):
     """Current price vs threshold."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if data.quote and data.quote.last is not None:
-            return data.quote.last
+        if data.snapshot and data.snapshot.last is not None:
+            return data.snapshot.last
         if data.fundamental and data.fundamental.open is not None:
             return data.fundamental.open
         return None
@@ -28,17 +28,17 @@ class ChangeStrategy(FilterStrategy):
     def compute_value(self, data: MarketData) -> float | None:
         ref = self._param_str(EnumParametro.PUNTO_REFERENCIA_CHANGE, "CLOSE")
         medida = self._param_str(EnumParametro.TIPO_MEDIDA_CHANGE, "PRECIO")
-        current = data.quote.last if data.quote else None
+        current = data.snapshot.last if data.snapshot else None
         if current is None and data.fundamental:
             current = data.fundamental.open
 
         reference = None
         if ref == "OPEN":
-            reference = data.quote.open if data.quote else None
+            reference = data.snapshot.open if data.snapshot else None
             if not reference and data.fundamental:
                 reference = data.fundamental.open
         elif ref == "CLOSE":
-            reference = data.quote.prevClose if data.quote else None
+            reference = data.snapshot.prevClose if data.snapshot else None
             if reference is None and data.fundamental:
                 reference = data.fundamental.prevClose
         elif ref == "CLOSE_PRE_MARKET":
@@ -80,8 +80,8 @@ class GapFromCloseStrategy(FilterStrategy):
 
     def compute_value(self, data: MarketData) -> float | None:
         formato = self._param_str(EnumParametro.FORMATO_GAP_FROM_CLOSE, "PORCENTAJE")
-        current_open = data.quote.open if data.quote else None
-        prev_close = data.quote.prevClose if data.quote else None
+        current_open = data.snapshot.open if data.snapshot else None
+        prev_close = data.snapshot.prevClose if data.snapshot else None
         if not current_open and data.fundamental:
             current_open = data.fundamental.open or data.fundamental.preMarketClose
         if prev_close is None and data.fundamental:
@@ -96,7 +96,7 @@ class PositionInRangeStrategy(FilterStrategy):
     """Position of current price within day's range (0-100%)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        q = data.quote
+        q = data.snapshot
         if not q or q.high is None or q.low is None:
             return None
         if q.high <= q.low:
@@ -111,7 +111,7 @@ class PercentageRangeStrategy(FilterStrategy):
     """Day's range as percentage of price."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        q = data.quote
+        q = data.snapshot
         if not q or q.high is None or q.low is None:
             return None
         mid = (q.high + q.low) / 2.0
@@ -124,7 +124,7 @@ class RangeDollarsStrategy(FilterStrategy):
     """Day's range in dollars."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        q = data.quote
+        q = data.snapshot
         if not q or q.high is None or q.low is None:
             return None
         return q.high - q.low
@@ -182,7 +182,7 @@ class HaltStrategy(FilterStrategy):
     """Whether trading is halted."""
 
     def compute_value(self, data: MarketData) -> float:
-        if data.quote and data.quote.tradingHalted:
+        if data.snapshot and data.snapshot.tradingHalted:
             return 1.0
         if data.fundamental and data.fundamental.tradingStatus:
             status = data.fundamental.tradingStatus

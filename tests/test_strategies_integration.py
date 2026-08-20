@@ -33,7 +33,7 @@ from app.strategies.volumen.relative_volume import RelativeVolumeStrategy
 from app.strategies.volumen.volume import VolumeStrategy
 from app.strategies.volumen.volume_spike import VolumeSpikeStrategy
 from app.strategies.volumen.volumen_post_pre import VolumenPostPreStrategy
-from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, QuoteResponse
+from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
 from app.strategies.base import MarketData
 
 BASE = "https://api.metradingplat.net"
@@ -64,14 +64,14 @@ def test_symbol(sym, token):
 
     quotes_raw = request(token, "POST", "/marketdata/quotes/cached", body=[sym])
     quote_val = quotes_raw.get(sym)
-    quote = QuoteResponse(symbol=sym, last=quote_val) if quote_val else None
+    snapshot = PriceSnapshot(symbol=sym, last=quote_val) if quote_val else None
 
     candles_raw = request(token, "POST", "/marketdata/historical/batch",
         body={"symbols": [sym], "timeframe": "M5", "bars": 20})
     candles_list = candles_raw.get("candlesPorSimbolo", {}).get(sym, [])
     candles = [CandleResponse(**c) for c in candles_list] if candles_list else []
 
-    data = MarketData(symbol=sym, fundamental=fund, quote=quote, candles=candles)
+    data = MarketData(symbol=sym, fundamental=fund, snapshot=snapshot, candles=candles)
 
     strategies = [
         ("FLOTA", FloatStrategy),

@@ -1,6 +1,7 @@
 import concurrent.futures
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from app.models.enums import EnumCategoriaFiltro, EnumFiltro
@@ -354,8 +355,13 @@ class SymbolPipeline:
             if not candidates:
                 break
             tf_label = _minutos_to_label(minutos)
-            bars_needed = bars_necesarias_grupo(filtros, minutos)
-            passing, stats = self._evaluar_grupo_tecnico(candidates, filtros, tf_label, bars_needed, matched)
+            # +1: la vela mas reciente que devuelve marketdata-service puede
+            # seguir en formacion (candles_m5/m15 agregan en vivo sobre M1 sin
+            # cerrar todavia) -- se pide una vela extra para poder descartarla
+            # y evaluar siempre sobre velas ya cerradas, sin quedar corto de
+            # historia real para el filtro mas exigente del grupo.
+            bars_needed = bars_necesarias_grupo(filtros, minutos) + 1
+            passing, stats = self._evaluar_grupo_tecnico(candidates, filtros, tf_label, bars_needed, matched, minutos)
             logger.info(
                 "evaluar_tecnicos %s: %d symbols, %d/%d bars with a null OHLC field",
                 tf_label, stats[0], stats[1], stats[2],
@@ -366,7 +372,7 @@ class SymbolPipeline:
 
     def _evaluar_grupo_tecnico(
         self, candidates: set[str], filtros: list[Filtro], tf_label: str, bars_needed: int,
-        matched: dict[str, list[SignalMatch]],
+        matched: dict[str, list[SignalMatch]], minutos: int,
     ) -> tuple[set[str], tuple[int, int, int]]:
         """Pide y evalua velas por lotes acotados y concurrentes (no todo el
         universo candidato de una sola llamada) -- con miles de simbolos, una
@@ -420,6 +426,19 @@ class SymbolPipeline:
                                 tf_label, sym,
                             )
                             continue
+                        # marketdata-service agrega M5/M15 en vivo sobre M1
+                        # sin cerrar todavia -- la ultima vela devuelta puede
+                        # seguir formandose. Evaluar sobre eso produce señales
+                        # que "repintan": el precio/hora que se registra deja
+                        # de coincidir con la vela una vez que termina de
+                        # cerrar (confirmado en vivo con SUGP: precio de una
+                        # vela M5 a medio formar, que ya no calzaba con
+                        # ninguna vela real del grafico media hora despues).
+                        # Se descarta si su cierre (timestamp + minutos) es
+                        # posterior a ahora -- bars_needed ya pidio una vela
+                        # de mas para compensar.
+                        if candles and candles[-1].timestamp + timedelta(minutes=minutos) > datetime.now(timezone.utc):
+                            candles = candles[:-1]
                         total_bars += len(candles)
                         null_bars += sum(
                             1 for c in candles

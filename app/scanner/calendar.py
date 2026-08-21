@@ -1,8 +1,11 @@
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+_ET = ZoneInfo("America/New_York")
 
 _US_HOLIDAYS_2026: List[date] = [
     date(2026, 1, 1),
@@ -23,24 +26,35 @@ _EARLY_CLOSE_DATES: set[date] = {
     date(2026, 12, 24),
 }
 
-_EARLY_CLOSE_TIME = time(17, 0, 0)
+_EARLY_CLOSE_TIME_ET = time(17, 0, 0)
 
 
-_REGULAR_CLOSE = time(20, 0, 0)
+_REGULAR_CLOSE_ET = time(20, 0, 0)
 
 # Apertura real del pre-market extendido (dxFeed/TastyTrade) -- fuera de
-# [_MARKET_OPEN_TIME, market_close_time()] no hay actividad real (ni
+# [_MARKET_OPEN_TIME_ET, market_close_time()] no hay actividad real (ni
 # trades, ni velas nuevas), asi que un escaner configurado con horaInicio
 # antes de esto solo evaluaria datos muertos hasta que el mercado abra de
 # verdad. No cambia por dia (a diferencia del cierre, no hay apertura
 # "anticipada" en el calendario US).
-_MARKET_OPEN_TIME = time(4, 0, 0)
+_MARKET_OPEN_TIME_ET = time(4, 0, 0)
+
+
+def _et_to_utc_time(et_time: time, check_date: date) -> time:
+    """Convierte una hora de pared ET a su equivalente UTC para una fecha
+    dada. escaner.horaInicio/horaFin llegan siempre en UTC (confirmado
+    contra la BD: un escaner de post-market guarda hora_inicio=20:00:00) --
+    comparar directo contra constantes en ET (como se hacia antes) rompia
+    cualquier escaner cuyo horaInicio cayera en la tarde/noche UTC (que es
+    justo donde vive TODO el rango 4am-8pm ET, por el offset de EE.UU.).
+    Un offset fijo (+4/+5) tambien rompe en el cambio de horario de verano
+    -- zoneinfo usa el offset real de ese dia."""
+    return datetime.combine(check_date, et_time, tzinfo=_ET).astimezone(timezone.utc).time()
 
 
 def market_close_time(check_date: date) -> time:
-    if check_date in _EARLY_CLOSE_DATES:
-        return _EARLY_CLOSE_TIME
-    return _REGULAR_CLOSE
+    et_close = _EARLY_CLOSE_TIME_ET if check_date in _EARLY_CLOSE_DATES else _REGULAR_CLOSE_ET
+    return _et_to_utc_time(et_close, check_date)
 
 
 def effective_end(escaner_end: time, check_date: date) -> time:
@@ -58,19 +72,21 @@ def effective_end(escaner_end: time, check_date: date) -> time:
     return min(escaner_end, market_close_time(check_date))
 
 
-def effective_start(escaner_start: time) -> time:
-    # Simetrico a effective_end: un escaner configurado fuera de
-    # [_MARKET_OPEN_TIME, _REGULAR_CLOSE) queda recortado a la apertura de
-    # pre-market -- evaluar horas de mercado genuinamente muerto no puede
-    # producir ninguna señal real, solo carga inutil sobre
-    # marketdata-service. max() por si solo NO alcanza aca: 21:00 (noche
-    # muerta) es numericamente MAYOR que las 04:00 de apertura, asi que
-    # max(21:00, 04:00) devolveria 21:00 sin recortar nada -- hay que
-    # chequear el rango explicito, no comparar como si el dia no diera la
-    # vuelta. Un horaInicio YA dentro de horas reales (ej. 9:30) no se toca.
-    if _MARKET_OPEN_TIME <= escaner_start < _REGULAR_CLOSE:
+def effective_start(escaner_start: time, check_date: date) -> time:
+    # Simetrico a effective_end: un escaner configurado fuera de las horas
+    # reales de mercado (4am-8pm ET, convertido a UTC para check_date) queda
+    # recortado a la apertura de pre-market -- evaluar horas de mercado
+    # genuinamente muerto no puede producir ninguna señal real, solo carga
+    # inutil sobre marketdata-service. El rango 4am-8pm ET SIEMPRE cruza
+    # medianoche UTC (ET va detras de UTC todo el año), asi que "dentro de
+    # rango" es "hora >= apertura O hora <= cierre", nunca un simple <=
+    # entre los dos valores. Un horaInicio YA dentro de horas reales (ej.
+    # 9:30 ET / 13:30 UTC, o 16:00 ET / 20:00 UTC de post-market) no se toca.
+    open_utc = _et_to_utc_time(_MARKET_OPEN_TIME_ET, check_date)
+    close_utc = _et_to_utc_time(_REGULAR_CLOSE_ET, check_date)
+    if escaner_start >= open_utc or escaner_start <= close_utc:
         return escaner_start
-    return _MARKET_OPEN_TIME
+    return open_utc
 
 
 def is_trading_day(check_date: date) -> bool:

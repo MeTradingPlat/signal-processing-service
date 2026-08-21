@@ -65,7 +65,7 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
         pipeline = SymbolPipeline(escaner)
         pipeline.cargar_todos()
     now = _now or datetime.now(timezone.utc)
-    start = effective_start(escaner.horaInicio)
+    start = effective_start(escaner.horaInicio, now.date())
     end = effective_end(escaner.horaFin, now.date())
     if not is_within_window(now, start, end):
         window_start = next_trading_window(start, now)
@@ -128,10 +128,6 @@ def _clear_old_signals(scanner_id: int):
 
 
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):
-    # effective_start no depende de la fecha (a diferencia de effective_end,
-    # que si cambia en dias de cierre anticipado) -- se calcula una sola vez
-    # fuera del loop.
-    start = effective_start(escaner.horaInicio)
     last_date = None
     try:
         while True:
@@ -139,6 +135,11 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                 logger.warning("ScannerRunner: orchestrator died id=%d", escaner.idEscaner)
                 return
             now = datetime.now(timezone.utc)
+            # effective_start SI depende de la fecha (conversion ET->UTC
+            # consciente de horario de verano) -- recalcular en cada vuelta,
+            # igual que effective_end, para no quedar con un valor obsoleto
+            # si el proceso vive a traves de un cambio de horario.
+            start = effective_start(escaner.horaInicio, now.date())
             end = effective_end(escaner.horaFin, now.date())
             if is_within_window(now, start, end):
                 if last_date != now.date():
@@ -181,7 +182,7 @@ def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: dateti
             logger.warning("ScannerRunner: orchestrator died id=%d", escaner.idEscaner)
             return
         now = _now or datetime.now(timezone.utc)
-        start = effective_start(escaner.horaInicio)
+        start = effective_start(escaner.horaInicio, now.date())
         end = effective_end(escaner.horaFin, now.date())
         if now.time() >= end or not is_within_window(now, start, end):
             return

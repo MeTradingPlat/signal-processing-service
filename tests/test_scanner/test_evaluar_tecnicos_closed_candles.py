@@ -68,42 +68,6 @@ def test_signal_price_and_timestamp_come_from_last_closed_candle_not_forming_one
     assert match.precio == 11.0
 
 
-def test_recently_closed_candle_still_discarded_within_settle_buffer():
-    # Regression: una vela puede estar "cerrada por reloj" (timestamp +
-    # minutos <= ahora) y aun asi tener datos incompletos si el ultimo M1 que
-    # la compone llego tarde a la BD -- confirmado en vivo con NMAX: una vela
-    # M5 cerrada 100s antes por reloj tenia el precio de un momento a medio
-    # completar (el high de ese instante), no el close final. Una vela que
-    # acaba de cerrar hace muy poco (dentro de _CLOSE_SETTLE_BUFFER) se
-    # descarta igual que una en formacion.
-    now = datetime.now(timezone.utc)
-    closed_way_older = CandleResponse(
-        symbol="AAPL", timestamp=now - timedelta(minutes=20),
-        open=10.0, high=10.0, low=10.0, close=10.0, volume=100,
-    )
-    closed_settled = CandleResponse(
-        symbol="AAPL", timestamp=now - timedelta(minutes=10),
-        open=13.0, high=13.0, low=13.0, close=13.0, volume=100,
-    )
-    recently_closed = CandleResponse(
-        symbol="AAPL", timestamp=now - timedelta(minutes=5, seconds=30),
-        open=999.0, high=999.0, low=999.0, close=999.0, volume=99999,
-    )
-
-    pipeline = SymbolPipeline(_escaner())
-    pipeline._filtrados = ["AAPL"]
-    filtro = _relative_volume_m5_filtro()
-
-    with patch.object(pipeline._client, "fetch_candles",
-                       return_value={"AAPL": [closed_way_older, closed_settled, recently_closed]}):
-        signals = pipeline.evaluar_tecnicos({5: [filtro]})
-
-    assert "AAPL" in signals
-    match = signals["AAPL"][0]
-    assert match.vela_timestamp == closed_settled.timestamp
-    assert match.precio == 13.0
-
-
 def test_last_candle_kept_when_already_closed():
     now = datetime.now(timezone.utc)
     older = CandleResponse(

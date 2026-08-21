@@ -1,6 +1,7 @@
 import gzip
 import json
 import logging
+import re
 import urllib.request
 from typing import List, Optional
 
@@ -84,11 +85,21 @@ class MarketdataClient:
     _READY_SAMPLE_MERCADOS = ["NASDAQ", "NYSE", "AMEX", "ETF"]
     _READY_THRESHOLD = 0.8
 
+    # Warrants ("BWIV/WS") y preferentes ("PCGpA", "SNUSpI") no tienen
+    # marketCap/prevClose de forma estructural (mismo motivo que los ETF sin
+    # EPS -- no es que falten datos, es que no aplican). Los primeros N
+    # simbolos de cada mercado (orden fijo, siempre los mismos en cada
+    # arranque) caian a menudo por debajo del 80% de poblados solo por mala
+    # suerte con el orden alfabetico -- confirmado en vivo: fundamentals_ready
+    # nunca llegaba a True, 5 minutos perdidos en CADA arranque del servicio.
+    _NOT_COMMON_STOCK_RE = re.compile(r"/|p[A-Z]{1,2}$")
+
     def fundamentals_ready(self, per_mercado_sample: int = 5) -> bool:
         try:
             sample: List[str] = []
             for mercado in self._READY_SAMPLE_MERCADOS:
-                sample.extend(self.fetch_symbols([mercado])[:per_mercado_sample])
+                candidatos = [s for s in self.fetch_symbols([mercado]) if not self._NOT_COMMON_STOCK_RE.search(s)]
+                sample.extend(candidatos[:per_mercado_sample])
             if not sample:
                 return False
             fundamentals = self.fetch_fundamentals(sample)

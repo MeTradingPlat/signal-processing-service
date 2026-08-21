@@ -320,7 +320,7 @@ class SymbolPipeline:
             if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
                 remaining.append(sym)
         self._filtrados = remaining
-        logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(quotes), len(self._filtrados))
+        logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(prices), len(self._filtrados))
 
     def _excluir_ya_senializados_hoy(self):
         """Consulta al log-service los simbolos que ya tuvieron senal hoy para

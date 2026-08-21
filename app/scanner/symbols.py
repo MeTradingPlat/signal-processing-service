@@ -117,6 +117,16 @@ class _PassthroughStrategy(FilterStrategy):
 _CANDLE_CHUNK_SIZE = 700
 _CANDLE_CHUNK_WORKERS = 2
 
+# Margen despues del cierre "de reloj" de una vela antes de confiar en que
+# sus datos ya son definitivos -- confirmado en vivo con NMAX: una vela M5
+# cerrada 100s antes (por reloj) todavia le faltaba el ultimo M1 (llego
+# tarde a la BD), y la señal quedo con el precio de esa vela a medio
+# completar (el high de ese momento, no el close final) en vez del cierre
+# real. timestamp+minutos > ahora ya descarta la vela EN FORMACION, pero no
+# alcanza para la que acaba de cerrar y todavia puede tener datos en
+# camino -- este buffer cubre ese hueco.
+_CLOSE_SETTLE_BUFFER = timedelta(seconds=90)
+
 _STATIC_PRE: set[EnumCategoriaFiltro] = {
     EnumCategoriaFiltro.CARACTERISTICAS_FUNDAMENTALES,
 }
@@ -428,16 +438,18 @@ class SymbolPipeline:
                             continue
                         # marketdata-service agrega M5/M15 en vivo sobre M1
                         # sin cerrar todavia -- la ultima vela devuelta puede
-                        # seguir formandose. Evaluar sobre eso produce señales
-                        # que "repintan": el precio/hora que se registra deja
-                        # de coincidir con la vela una vez que termina de
-                        # cerrar (confirmado en vivo con SUGP: precio de una
-                        # vela M5 a medio formar, que ya no calzaba con
-                        # ninguna vela real del grafico media hora despues).
-                        # Se descarta si su cierre (timestamp + minutos) es
-                        # posterior a ahora -- bars_needed ya pidio una vela
-                        # de mas para compensar.
-                        if candles and candles[-1].timestamp + timedelta(minutes=minutos) > datetime.now(timezone.utc):
+                        # seguir formandose, o acabar de cerrar por reloj pero
+                        # con datos todavia asentandose (confirmado en vivo:
+                        # SUGP con una vela a medio formar, NMAX con una vela
+                        # "cerrada" pero con el ultimo M1 llegando tarde a la
+                        # BD). Evaluar sobre cualquiera de las dos produce
+                        # señales que "repintan": el precio/hora que se
+                        # registra deja de coincidir con la vela una vez que
+                        # termina de asentarse. Se descarta si su cierre mas
+                        # el margen de asentamiento (timestamp + minutos +
+                        # _CLOSE_SETTLE_BUFFER) es posterior a ahora --
+                        # bars_needed ya pidio una vela de mas para compensar.
+                        if candles and candles[-1].timestamp + timedelta(minutes=minutos) + _CLOSE_SETTLE_BUFFER > datetime.now(timezone.utc):
                             candles = candles[:-1]
                         total_bars += len(candles)
                         null_bars += sum(

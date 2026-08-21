@@ -272,6 +272,14 @@ class SymbolPipeline:
 
     def _aplicar_estaticos(self):
         if not self.pre_estaticos:
+            # Sin filtros estaticos que reinicien el pool desde _todos cada
+            # ciclo, _aplicar_dinamicos venia filtrando sobre su propio
+            # resultado del ciclo anterior (nunca sobre el universo completo)
+            # -- un simbolo que un dia dejaba de cumplir el filtro dinamico
+            # quedaba excluido para siempre, hasta converger a lista vacia y
+            # quedarse ahi (confirmado en vivo: 'TEST POST MARKET', solo
+            # CHANGE + GAP_FROM_CLOSE dinamicos, 3+ horas seguidas en 0).
+            self._filtrados = list(self._todos)
             return
         remaining = []
         rejected_no_data = 0

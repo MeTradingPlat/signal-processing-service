@@ -22,21 +22,33 @@ def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
     """Seconds to sleep before the next cycle.
 
     Defaults to the flat _CYCLE_SECONDS cadence, but when the tightest
-    technical filter's timeframe closes within that same window (in
-    practice only M1), sleeps until _BAR_CLOSE_BUFFER_SECONDS after that
-    bar's close instead. Without this, a plain 60s-after-last-cycle sleep
-    drifts against wall-clock minute boundaries and can poll marketdata a
-    couple of seconds before the bar closes, silently working with a
-    minute-old bar until the next cycle picks it up.
+    technical filter's bar closes within that same window, sleeps until
+    _BAR_CLOSE_BUFFER_SECONDS after that close instead. Without this, a
+    plain 60s-after-last-cycle sleep drifts against wall-clock boundaries
+    and can poll marketdata before the bar closes, silently working with a
+    stale bar until the next cycle happens to catch up.
+
+    Antes esto solo alineaba cuando el timeframe mas fino era M1 (period <=
+    _CYCLE_SECONDS caia directo en ese caso) -- para M5/M15/etc. period
+    siempre es mayor a _CYCLE_SECONDS, asi que se devolvia el flat de 60s
+    SIEMPRE, sin alinear nunca al cierre real. Confirmado en vivo: una
+    señal M5 disparo con casi 2 minutos de atraso sobre el cierre real de
+    su vela. Ahora compara cuanto falta para el proximo cierre contra
+    _CYCLE_SECONDS (no el periodo completo): si el cierre cae dentro del
+    prox tick normal, este ciclo se corre hasta ahi -- el resto del tiempo
+    sigue en cadencia de 60s normal, para no perder capacidad de reaccion
+    de los filtros dinamicos (precio/volumen) que si se benefician de
+    sondear seguido.
     """
     if not pipeline.tecnicos:
         return _CYCLE_SECONDS
     min_minutos = min(agrupar_por_timeframe(pipeline.tecnicos))
     period = min_minutos * 60.0
-    if period > _CYCLE_SECONDS:
-        return _CYCLE_SECONDS
     seconds_into_period = now.timestamp() % period
-    return (period - seconds_into_period) + _BAR_CLOSE_BUFFER_SECONDS
+    seconds_to_close = period - seconds_into_period
+    if seconds_to_close > _CYCLE_SECONDS:
+        return _CYCLE_SECONDS
+    return seconds_to_close + _BAR_CLOSE_BUFFER_SECONDS
 
 
 def run_scanner(escaner: Escaner):

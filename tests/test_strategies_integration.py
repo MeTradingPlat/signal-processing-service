@@ -62,7 +62,7 @@ def test_symbol(sym, token):
     fundamentals = request(token, "POST", "/marketdata/fundamentals/realtime", body=[sym]).get(sym, {})
     fund = FundamentalResponse(**fundamentals) if fundamentals else None
 
-    quotes_raw = request(token, "POST", "/marketdata/quotes/cached", body=[sym])
+    quotes_raw = request(token, "POST", "/marketdata/quotes/rest", body=[sym])
     quote_val = quotes_raw.get(sym)
     snapshot = PriceSnapshot(symbol=sym, last=quote_val) if quote_val else None
 

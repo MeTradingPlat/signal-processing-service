@@ -147,7 +147,13 @@ class MarketdataClient:
         chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
 
         result = {}
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        # Bajado de 10 a 4: 10 chunks en paralelo x hasta 20 goroutines por
+        # request en marketdata-service podian sumar 200 intentos simultaneos
+        # de conexion a un pool de 25 -- confirmado en logs de produccion 5%
+        # de estas llamadas tardando ~15s (el timeout) por esa cola. Bajando
+        # la concurrencia del lado cliente se reduce el peor caso sin tocar
+        # marketdata-service.
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {executor.submit(self._request, "POST", "/marketdata/quotes/rest", body=c, timeout=15): c for c in chunks}
             for future in as_completed(futures, timeout=30):
                 try:

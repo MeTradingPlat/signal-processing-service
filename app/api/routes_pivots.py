@@ -21,7 +21,12 @@ def get_pivots(
     endpoint de exploracion para dibujar en el chart de Activos, todavia sin
     ligar a ningun escaner/orden."""
     bars = anios_historico * _TRADING_DAYS_PER_YEAR + 30
-    candles = _client.fetch_candles([symbol], _TIMEFRAME, bars).get(symbol, [])
+    candles_crudas = _client.fetch_candles([symbol], _TIMEFRAME, bars).get(symbol, [])
+    # La vela D1 del dia en curso suele venir con high/low/close en None hasta
+    # que cierra -- sin filtrarla, calculate_atr revienta con un 500 al restar
+    # None (confirmado en vivo: fallaba para CUALQUIER simbolo, no solo uno
+    # con historial corto).
+    candles = [c for c in candles_crudas if c.high is not None and c.low is not None and c.close is not None]
     if len(candles) < atr_length + 1:
         raise HTTPException(status_code=404, detail="No hay suficiente historial D1 para este símbolo")
 

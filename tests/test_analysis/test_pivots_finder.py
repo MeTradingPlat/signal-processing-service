@@ -19,8 +19,8 @@ def test_finds_strong_resistance_and_support_around_price():
 
     resistencias, soportes = find_pivots(candles, current_price=100.0, atr_length=14, number_pivots=1)
 
-    assert resistencias == [(candles[5].timestamp, 101.0)]
-    assert soportes == [(candles[8].timestamp, 99.0)]
+    assert resistencias == [(candles[5].timestamp, 101.0, "strong")]
+    assert soportes == [(candles[8].timestamp, 99.0, "strong")]
 
 
 def test_falls_back_to_weak_pivot_when_no_strong_found():
@@ -31,7 +31,20 @@ def test_falls_back_to_weak_pivot_when_no_strong_found():
 
     resistencias, _ = find_pivots(candles, current_price=100.0, atr_length=14, number_pivots=1)
 
-    assert resistencias == [(candles[10].timestamp, 100.2)]
+    assert resistencias == [(candles[10].timestamp, 100.2, "weak")]
+
+
+def test_returns_a_series_with_several_strong_levels_when_asked_for_several():
+    candles = [_candle(i, 100.2, 99.8) for i in range(30)]
+    candles[5] = _candle(5, 101.0, 99.8)   # primer pico fuerte
+    candles[20] = _candle(20, 101.5, 99.8)  # segundo pico fuerte, mas lejos
+
+    resistencias, _ = find_pivots(candles, current_price=100.0, atr_length=14, number_pivots=3)
+
+    assert {(ts, price, strength) for ts, price, strength in resistencias} == {
+        (candles[5].timestamp, 101.0, "strong"),
+        (candles[20].timestamp, 101.5, "strong"),
+    }
 
 
 def test_returns_empty_when_nothing_found():

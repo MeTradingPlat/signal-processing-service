@@ -15,7 +15,7 @@ _TRADING_DAYS_PER_YEAR = 252
 @router.get("/{symbol}")
 def get_pivots(
     symbol: str, atr_length: int = 14, slip_ratio_pct: float = 0.1,
-    longitud_velas: int = 2, anios_historico: int = 5, numero_pivotes: int = 1,
+    longitud_velas: int = 2, anios_historico: int = 5, numero_pivotes: int = 5,
 ):
     """Picos/valles de precio cercanos al precio actual de symbol en D1 --
     endpoint de exploracion para dibujar en el chart de Activos, todavia sin
@@ -43,6 +43,12 @@ def get_pivots(
         "symbol": symbol,
         "currentPrice": current_price,
         "timeframe": "D1",
-        "resistances": [{"timestamp": ts.isoformat(), "price": price} for ts, price in resistencias],
-        "supports": [{"timestamp": ts.isoformat(), "price": price} for ts, price in soportes],
+        "resistances": [
+            {"timestamp": ts.isoformat(), "price": price, "strength": strength}
+            for ts, price, strength in resistencias
+        ],
+        "supports": [
+            {"timestamp": ts.isoformat(), "price": price, "strength": strength}
+            for ts, price, strength in soportes
+        ],
     }

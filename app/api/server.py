@@ -23,6 +23,7 @@ def create_app(pipe_connection: Connection) -> FastAPI:
     from app.api.routes_health import router as health_router
     from app.api.routes_scanner import router as scanner_router
     from app.api.routes_calendar import router as calendar_router
+    from app.api.routes_pivots import router as pivots_router
 
     app = FastAPI(
         title="Signal Processing Service",
@@ -32,4 +33,5 @@ def create_app(pipe_connection: Connection) -> FastAPI:
     app.include_router(health_router)
     app.include_router(scanner_router)
     app.include_router(calendar_router)
+    app.include_router(pivots_router)
     return app

@@ -83,18 +83,24 @@ class MarketdataClient:
     # normal even when marketdata's pipeline is fully healthy, so including
     # it would make this check fail on data sparsity, not actual readiness.
     _READY_SAMPLE_MERCADOS = ["NASDAQ", "NYSE", "AMEX", "ETF"]
-    _READY_THRESHOLD = 0.8
+    # El umbral separa "cache de fundamentales cargada" de "cache vacia"
+    # (marketdata recien levantado): cache vacia da ~0%, cache cargada da
+    # ~74% con la composicion actual (los ETF canadienses sin datos de
+    # TastyTrade arrastran el promedio -- HXE/HXC/HXA no tienen marketCap/
+    # prevClose de forma estructural, no es que falte la carga). Medido en
+    # vivo el 2026-08-24: primeros 50 de cada mercado, poblados 40/50/88/100%
+    # por mercado. El 0.8 anterior con muestra de 5 (los primeros 5
+    # alfabeticos de cada mercado, siempre los mismos) nunca se alcanzaba --
+    # fundamentals_ready daba False en CADA arranque y el readiness esperaba
+    # los 60 intentos (~5 min) antes de arrancar "de todas formas".
+    _READY_THRESHOLD = 0.6
 
     # Warrants ("BWIV/WS") y preferentes ("PCGpA", "SNUSpI") no tienen
     # marketCap/prevClose de forma estructural (mismo motivo que los ETF sin
-    # EPS -- no es que falten datos, es que no aplican). Los primeros N
-    # simbolos de cada mercado (orden fijo, siempre los mismos en cada
-    # arranque) caian a menudo por debajo del 80% de poblados solo por mala
-    # suerte con el orden alfabetico -- confirmado en vivo: fundamentals_ready
-    # nunca llegaba a True, 5 minutos perdidos en CADA arranque del servicio.
+    # EPS -- no es que falten datos, es que no aplican).
     _NOT_COMMON_STOCK_RE = re.compile(r"/|p[A-Z]{1,2}$")
 
-    def fundamentals_ready(self, per_mercado_sample: int = 5) -> bool:
+    def fundamentals_ready(self, per_mercado_sample: int = 25) -> bool:
         try:
             sample: List[str] = []
             for mercado in self._READY_SAMPLE_MERCADOS:

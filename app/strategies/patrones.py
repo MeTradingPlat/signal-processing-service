@@ -100,7 +100,11 @@ class HighLowOfDayStrategy(FilterStrategy):
         day_high = max(c.high for c in todays)
         day_low = min(c.low for c in todays)
         if day_high <= day_low:
-            return 0.0
+            # Un solo candle del dia (o todos al mismo precio) no tiene rango:
+            # devolver 0.0 era "distancia al minimo = 0%" y pasaba cualquier
+            # condicion MENOR_QUE -- los warrants que negocian 1 vela al dia
+            # senialaban siempre (confirmado en vivo 2026-08-24).
+            return None
         price = todays[-1].close
         opcion = self._param_str(EnumParametro.OPCION_EXTREMO_HIGH_LOW_DAY, "HIGH")
         if opcion == "LOW":
@@ -114,7 +118,10 @@ class NewCandleHighLowStrategy(FilterStrategy):
     la seleccion del usuario)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or len(data.candles) < 2:
+        # Minimo 3 velas (2 previas), igual que BREAK_OVER: "nuevo maximo de
+        # N velas" contra una sola vela previa es ruido en series degeneradas
+        # (warrants con 1 vela al dia).
+        if not data.candles or len(data.candles) < 3:
             return None
         prior = data.candles[:-1]
         curr = data.candles[-1]
@@ -162,7 +169,11 @@ class BreakOverRecentHighsLowsStrategy(FilterStrategy):
     dos, sin filtrar por la seleccion del usuario)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or len(data.candles) < 2:
+        # Minimo 3 velas (2 previas): con solo 2 (la actual y una previa)
+        # "romper el maximo reciente" es comparar contra UN solo candle, y
+        # las series degeneradas (warrants con 1 vela al dia) lo pasaban
+        # con un tick de fracciones de centavo (confirmado en vivo 2026-08-24).
+        if not data.candles or len(data.candles) < 3:
             return None
         prior = data.candles[:-1]
         curr = data.candles[-1]

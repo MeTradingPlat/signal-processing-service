@@ -28,7 +28,7 @@ def get_pivots(
     symbol: str, atr_length: int = 14, slip_ratio_pct: float = 0.1,
     longitud_velas: int = 2, anios_historico: int = 4, numero_pivotes: int = 5,
 ):
-    """Picos/valles de precio cercanos al cierre anterior de symbol en D1 --
+    """Picos/valles de precio cercanos al precio actual de symbol en D1 --
     endpoint de exploracion para dibujar en el chart de Activos, todavia sin
     ligar a ningun escaner/orden.
 
@@ -40,15 +40,9 @@ def get_pivots(
     historial). Los pivotes debiles solo se buscan en el ultimo intento (el
     de historial mas profundo), como relleno final si aun faltan fuertes.
     """
-    # Precio de referencia fijo = cierre del dia anterior (decidido con el
-    # cliente 2026-08-24): recalcular a cualquier hora del dia da el mismo
-    # set de pivotes, asi los niveles trazados en el diario se mantienen al
-    # cambiar de timeframe. Antes era el precio en vivo, que desplazaba el
-    # set si se volvia a consultar mas tarde en el dia.
-    fund = _client.fetch_fundamentals([symbol]).get(symbol)
-    current_price = fund.prevClose if fund else None
+    current_price = _client.fetch_current_prices([symbol]).get(symbol)
     if current_price is None:
-        raise HTTPException(status_code=404, detail="No se pudo obtener el cierre anterior del símbolo")
+        raise HTTPException(status_code=404, detail="No se pudo obtener el precio actual del símbolo")
 
     atr = None
     resistencias_fuertes: list = []

@@ -184,6 +184,16 @@ _REQUIERE_VELAS: set[EnumFiltro] = {
     EnumFiltro.BACK_TO_EMA_ALERT,
     EnumFiltro.THROUGH_EMA_VWAP_ALERT,
     EnumFiltro.EMA_VWAP_SUPPORT_RESISTANCE,
+    # Mismo caso que PERCENTAGE_CHANGE: las FiltroFactory*.java de estos las
+    # declaran PRECIO_Y_MOVIMIENTO (etapa dinamica, candles=None siempre)
+    # pero sus estrategias leen data.candles (maximo/minimo del dia, ultimas
+    # N velas, rango reciente) -- en la etapa dinamica devuelven None SIEMPRE
+    # y ningun simbolo pasa (confirmado en vivo el 2026-08-24: el escaner
+    # 'PRUEBA 23344' con BREAK_OVER_RECENT_HIGHS_LOWS + HIGH_LOW_OF_DAY daba
+    # "dynamic filters 11532 -> 0" en cada ciclo).
+    EnumFiltro.BREAK_OVER_RECENT_HIGHS_LOWS,
+    EnumFiltro.HIGH_LOW_OF_DAY,
+    EnumFiltro.PERCENTAGE_PULLBACK_HIGHS_LOWS,
 }
 
 

@@ -224,6 +224,15 @@ class SymbolPipeline:
         self.pre_estaticos, self.pre_dinamicos, self.tecnicos = categorizar_filtros(escaner.filtros)
         self._todos: List[str] = []
         self._filtrados: List[str] = []
+        # Ultimo set que paso los filtros dinamicos con exito -- ante un fallo
+        # de fetch_current_prices (marketdata-service caido/reiniciando) el
+        # fallback usa ESTE set, no el universo: sin filtros estaticos
+        # configurados, _aplicar_estaticos ya reseteo _filtrados al universo
+        # completo antes, asi que el fallback ciego evaluaba tecnicos sobre
+        # TODO el universo con el filtro de volumen (o precio) simplemente
+        # sin aplicar (confirmado en vivo 2026-08-24: 35 min de fallos del
+        # fetch de precios y warrants de 2 velas al dia senialados).
+        self._ultimo_filtrado: List[str] = []
         self._client = MarketdataClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
         self._signaled_today: set = set()
@@ -311,9 +320,11 @@ class SymbolPipeline:
             prices = self._client.fetch_current_prices(self._filtrados)
         except Exception as e:
             logger.error("Failed to fetch current prices, keeping previous filtered set: %s", e)
+            self._filtrados = list(self._ultimo_filtrado)
             return
         if not prices:
             logger.warning("Dynamic filters: no price data, keeping previous filtered set")
+            self._filtrados = list(self._ultimo_filtrado)
             return
         remaining = []
         for sym in self._filtrados:
@@ -339,6 +350,7 @@ class SymbolPipeline:
             if all(_get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
                 remaining.append(sym)
         self._filtrados = remaining
+        self._ultimo_filtrado = list(remaining)
         logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(prices), len(self._filtrados))
 
     def _excluir_ya_senializados_hoy(self):

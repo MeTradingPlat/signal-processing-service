@@ -31,8 +31,13 @@ _FIXED_LOOKBACK: dict[EnumFiltro, int] = {
     EnumFiltro.PERCENTAGE_PULLBACK_HIGHS_LOWS: 5,
     EnumFiltro.PIVOTS: 3,
     EnumFiltro.BEARISH_BULLISH_ENGULFING: 2,
-    EnumFiltro.NEW_CANDLE_HIGH_LOW: 2,
-    EnumFiltro.BREAK_OVER_RECENT_HIGHS_LOWS: 2,
+    # 3 en vez de 2: la estrategia exige 2 velas previas (ver patrones.py)
+    EnumFiltro.NEW_CANDLE_HIGH_LOW: 3,
+    # 3 en vez de 2: la estrategia exige 2 velas previas (ver patrones.py)
+    # para que "romper el maximo reciente" no sea comparar contra un solo
+    # candle -- pedir 2 barras dejaba al fetch devolver solo 3 y al estratega
+    # descartar la ultima por estar en formacion, evaluando con 2.
+    EnumFiltro.BREAK_OVER_RECENT_HIGHS_LOWS: 3,
 }
 
 # Filtros que solo miran las velas de HOY (_todays_candles): necesitan

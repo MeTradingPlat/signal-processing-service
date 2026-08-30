@@ -18,19 +18,6 @@ logger = logging.getLogger(__name__)
 _FETCH_SYMBOLS_RETRIES = 3
 _FETCH_SYMBOLS_RETRY_BACKOFF_SECONDS = 3.0
 
-# Una vela recien cerrada (dentro de esta ventana) puede seguir
-# completandose en marketdata-service bajo carga -- confirmado en vivo el
-# 2026-08-27 con EMAT en "Gap and Go - Momentum Matutino": el volumen real
-# de una vela M5 recien cerrada (con un pico de volumen real) solo aparecio
-# completo 3 ciclos (~3 min) despues, y para entonces el precio ya se habia
-# movido. dxLink expone un flag de transaccion pendiente para esto
-# (eventFlags/TX_PENDING) pero nuestra suscripcion en vivo no lo pide
-# todavia -- mientras tanto, este es el mismo principio que usan los
-# sistemas de trading en general: no dar una barra por cerrada de verdad
-# hasta confirmarla, aca con una segunda lectura en el ciclo siguiente en
-# vez de solo el reloj de pared.
-_CONFIRMATION_WINDOW_SECONDS = 90
-
 
 def _make_marketdata(
     symbol: str,
@@ -250,9 +237,6 @@ class SymbolPipeline:
         self._fundamentals: Dict[str, FundamentalResponse] = {}
         self._signaled_today: set = set()
         self._previously_matched: set = set()
-        # (symbol, minutos) -> vela_timestamp de la ultima vela recien cerrada
-        # que se retuvo sin publicar, ver _confirmar_vela_reciente.
-        self._pending_confirmation: Dict[tuple, datetime] = {}
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
             escaner.idEscaner, self.mercados,
@@ -506,8 +490,6 @@ class SymbolPipeline:
                         if len(sym_matches) == len(filtros):
                             vela_timestamp = candles[-1].timestamp
                             precio = candles[-1].close
-                            if self._vela_reciente_sin_confirmar(sym, minutos, vela_timestamp):
-                                continue
                             matched[sym].extend(
                                 SignalMatch(filtro=f, vela_timestamp=vela_timestamp, precio=precio)
                                 for f in sym_matches
@@ -515,20 +497,6 @@ class SymbolPipeline:
                             passing.add(sym)
 
         return passing, (symbols_with_data, null_bars, total_bars)
-
-    def _vela_reciente_sin_confirmar(self, symbol: str, minutos: int, vela_timestamp: datetime) -> bool:
-        """True si esta vela cerro hace muy poco y todavia no se confirmo en
-        un ciclo posterior -- la retiene un ciclo entero (~60-70s) antes de
-        dejarla pasar, en vez de publicar sobre datos que marketdata-service
-        puede seguir completando (ver _CONFIRMATION_WINDOW_SECONDS)."""
-        close_instant = vela_timestamp + timedelta(minutes=minutos)
-        fresh = (datetime.now(timezone.utc) - close_instant).total_seconds() < _CONFIRMATION_WINDOW_SECONDS
-        pending_key = (symbol, minutos)
-        if not fresh or self._pending_confirmation.get(pending_key) == vela_timestamp:
-            self._pending_confirmation.pop(pending_key, None)
-            return False
-        self._pending_confirmation[pending_key] = vela_timestamp
-        return True
 
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")

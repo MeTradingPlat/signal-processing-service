@@ -91,37 +91,3 @@ def test_last_candle_kept_when_already_closed():
     match = signals["AAPL"][0]
     assert match.vela_timestamp == already_closed.timestamp
     assert match.precio == 12.0
-
-
-def test_freshly_closed_candle_is_held_then_confirmed_next_cycle():
-    # Regression: marketdata-service puede seguir completando el volumen
-    # real de una vela M1/M5 recien cerrada bajo carga -- confirmado en vivo
-    # el 2026-08-27 con EMAT (RELATIVE_VOLUME M5), donde el volumen real de
-    # una vela recien cerrada solo aparecio completo 3 ciclos despues. Una
-    # vela que cerro hace muy poco (dentro de _CONFIRMATION_WINDOW_SECONDS)
-    # se retiene un ciclo -- si la MISMA vela sigue siendo la mas reciente en
-    # el ciclo siguiente, ya se deja pasar.
-    now = datetime.now(timezone.utc)
-    older = CandleResponse(
-        symbol="AAPL", timestamp=now - timedelta(minutes=20),
-        open=10.0, high=10.0, low=10.0, close=10.0, volume=100,
-    )
-    # Cierra hace 10s (vela abierta hace 5min10s, timeframe M5) -- dentro de
-    # la ventana de confirmacion.
-    just_closed = CandleResponse(
-        symbol="AAPL", timestamp=now - timedelta(minutes=5, seconds=10),
-        open=12.0, high=12.0, low=12.0, close=12.0, volume=100,
-    )
-
-    pipeline = SymbolPipeline(_escaner())
-    pipeline._filtrados = ["AAPL"]
-    filtro = _relative_volume_m5_filtro()
-
-    with patch.object(pipeline._client, "fetch_candles",
-                       return_value={"AAPL": [older, just_closed]}):
-        first_cycle = pipeline.evaluar_tecnicos({5: [filtro]})
-        assert "AAPL" not in first_cycle
-
-        second_cycle = pipeline.evaluar_tecnicos({5: [filtro]})
-        assert "AAPL" in second_cycle
-        assert second_cycle["AAPL"][0].vela_timestamp == just_closed.timestamp

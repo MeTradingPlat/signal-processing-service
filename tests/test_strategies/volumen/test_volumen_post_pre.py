@@ -69,3 +69,42 @@ def test_sin_fundamental_devuelve_none():
     strategy = _strategy(None)
     data = MarketData(symbol="AAPL")
     assert strategy.compute_value(data) is None
+
+
+def test_ambos_cae_a_prev_post_cuando_post_de_hoy_es_cero():
+    """postMarketVolume=0 en premarket es un dato real (la sesion de hoy
+    todavia no paso), no ausencia -- AMBOS debe usar el postmarket de AYER
+    en vez de tratarlo como si valiera 0."""
+    strategy = _strategy("AMBOS")
+    data = MarketData(
+        symbol="AAPL",
+        fundamental=FundamentalResponse(
+            symbol="AAPL", preMarketVolume=150000.0, postMarketVolume=0, prevPostMarketVolume=40000.0
+        ),
+    )
+    assert strategy.compute_value(data) == 190000.0
+
+
+def test_ambos_prefiere_post_de_hoy_sobre_prev_post_cuando_ya_hay_dato():
+    """Una vez que el post-market de hoy empieza a acumular volumen real, se
+    usa ese -- prevPostMarketVolume es solo el fallback para cuando hoy
+    todavia esta en 0."""
+    strategy = _strategy("AMBOS")
+    data = MarketData(
+        symbol="AAPL",
+        fundamental=FundamentalResponse(
+            symbol="AAPL", preMarketVolume=150000.0, postMarketVolume=25000.0, prevPostMarketVolume=999999.0
+        ),
+    )
+    assert strategy.compute_value(data) == 175000.0
+
+
+def test_ambos_sin_prev_post_ni_post_devuelve_none():
+    strategy = _strategy("AMBOS")
+    data = MarketData(
+        symbol="AAPL",
+        fundamental=FundamentalResponse(
+            symbol="AAPL", preMarketVolume=150000.0, postMarketVolume=0, prevPostMarketVolume=None
+        ),
+    )
+    assert strategy.compute_value(data) is None

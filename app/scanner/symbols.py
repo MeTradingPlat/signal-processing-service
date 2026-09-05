@@ -484,6 +484,20 @@ class SymbolPipeline:
                         )
                         if not candles:
                             continue
+                        # Descartar simbolos con datos congelados: su
+                        # suscripcion en vivo puede seguir "registrada" en
+                        # marketdata-service sin que llegue un solo tick real
+                        # (una muerte silenciosa que ningun watchdog nota hoy,
+                        # ver live_data_watchdog.go) -- evaluar un filtro
+                        # tecnico sobre esa ultima vela real, ya vieja, genera
+                        # una señal falsa y tardia (confirmado en vivo el
+                        # 2026-09-04 con BSV/TW: ultima vela real 30+ min
+                        # antes de la señal). max(15min, 2 periodos) tolera
+                        # el rezago normal de agregacion sin dejar pasar un
+                        # simbolo genuinamente mudo.
+                        staleness_limit = timedelta(minutes=max(15, minutos * 2))
+                        if datetime.now(timezone.utc) - candles[-1].timestamp > staleness_limit:
+                            continue
                         fund = self._fundamentals.get(sym)
                         data = _make_marketdata(sym, fund, candles, None)
                         sym_matches = [f for f in filtros if _get_strategy(f).evaluate(data)]

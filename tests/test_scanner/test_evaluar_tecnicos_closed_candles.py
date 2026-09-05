@@ -91,3 +91,39 @@ def test_last_candle_kept_when_already_closed():
     match = signals["AAPL"][0]
     assert match.vela_timestamp == already_closed.timestamp
     assert match.precio == 12.0
+
+
+def test_stale_symbol_discarded_even_if_it_would_otherwise_match():
+    # Regression: un simbolo cuya suscripcion en vivo murio en silencio
+    # (marketdata-service la sigue creyendo sana, ver live_data_watchdog.go)
+    # sigue devolviendo su ultima vela real, ya vieja -- evaluarla como si
+    # fuera actual genera una senal falsa y tardia (confirmado en vivo el
+    # 2026-09-04 con BSV/TW, ultima vela real 30+ min antes de la senal).
+    now = datetime.now(timezone.utc)
+    stale_older = CandleResponse(
+        symbol="BSV", timestamp=now - timedelta(minutes=41),
+        open=10.0, high=10.0, low=10.0, close=10.0, volume=1,
+    )
+    stale_last = CandleResponse(
+        symbol="BSV", timestamp=now - timedelta(minutes=31),
+        open=10.0, high=10.0, low=10.0, close=10.0, volume=1000,
+    )
+    older = CandleResponse(
+        symbol="AAPL", timestamp=now - timedelta(minutes=20),
+        open=10.0, high=10.0, low=10.0, close=10.0, volume=100,
+    )
+    fresh = CandleResponse(
+        symbol="AAPL", timestamp=now - timedelta(minutes=10),
+        open=12.0, high=12.0, low=12.0, close=12.0, volume=100,
+    )
+
+    pipeline = SymbolPipeline(_escaner())
+    pipeline._filtrados = ["BSV", "AAPL"]
+    filtro = _relative_volume_m5_filtro()
+
+    with patch.object(pipeline._client, "fetch_candles",
+                       return_value={"BSV": [stale_older, stale_last], "AAPL": [older, fresh]}):
+        signals = pipeline.evaluar_tecnicos({5: [filtro]})
+
+    assert "BSV" not in signals
+    assert "AAPL" in signals

@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -29,24 +28,21 @@ def _fetch_clean_candles(symbol: str, years: int):
 
 
 # El precio ancla desde el cual se buscan pivots arriba/abajo -- "live" es el
-# de siempre (ultimo trade real). "prev_close" reusa el cierre de la ultima
-# vela D1 YA CERRADA (un solo año alcanza, no hace falta pedir el historico
-# completo para esto). "open" necesita la vela D1 de HOY sin filtrar (todavia
-# en formacion: high/low/close en None pero open ya seteado desde la
-# apertura) -- si el mercado no abrio todavia hoy no hay open que devolver.
+# de siempre (ultimo trade real). "open" y "prev_close" son relativos a la
+# ULTIMA vela D1 que exista, sea de hoy o no (fin de semana, feriado, mercado
+# recien cerrado): "open" es la apertura de esa ultima vela (crudo, sin el
+# filtro de _fetch_clean_candles -- si sigue en formacion ya tiene open
+# seteado aunque high/low/close todavia esten en None), "prev_close" es el
+# cierre de la vela INMEDIATA ANTERIOR a esa, este cerrada o no la ultima.
 def _resolve_current_price(symbol: str, reference: PriceReference) -> float | None:
-    if reference == "prev_close":
-        candles = _fetch_clean_candles(symbol, 1)
-        return candles[-1].close if candles else None
+    if reference == "live":
+        return _client.fetch_current_prices([symbol]).get(symbol)
+    crudas = _client.fetch_candles([symbol], _TIMEFRAME, 2).get(symbol, [])
     if reference == "open":
-        crudas = _client.fetch_candles([symbol], _TIMEFRAME, 2).get(symbol, [])
-        if not crudas:
-            return None
-        vela_hoy = crudas[-1]
-        if vela_hoy.timestamp.date() != datetime.now(timezone.utc).date():
-            return None
-        return vela_hoy.open
-    return _client.fetch_current_prices([symbol]).get(symbol)
+        return crudas[-1].open if crudas else None
+    if reference == "prev_close":
+        return crudas[-2].close if len(crudas) >= 2 else None
+    return None
 
 
 @router.get("/{symbol}")
@@ -70,8 +66,7 @@ def get_pivots(
     current_price = _resolve_current_price(symbol, price_reference)
     if current_price is None:
         detail = ("No se pudo obtener el precio actual del símbolo" if price_reference == "live"
-                   else "El mercado todavía no abrió hoy" if price_reference == "open"
-                   else "No hay una vela D1 cerrada para este símbolo")
+                   else "No hay suficiente historial D1 para este símbolo")
         raise HTTPException(status_code=404, detail=detail)
 
     atr = None

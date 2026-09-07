@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 
 from app.analysis.pivots_atr import calculate_atr
@@ -12,6 +15,8 @@ _client = MarketdataClient()
 _TIMEFRAME = "_1D"
 _TRADING_DAYS_PER_YEAR = 252
 
+PriceReference = Literal["live", "open", "prev_close"]
+
 
 def _fetch_clean_candles(symbol: str, years: int):
     bars = years * _TRADING_DAYS_PER_YEAR + 30
@@ -23,10 +28,32 @@ def _fetch_clean_candles(symbol: str, years: int):
     return [c for c in candles_crudas if c.high is not None and c.low is not None and c.close is not None]
 
 
+# El precio ancla desde el cual se buscan pivots arriba/abajo -- "live" es el
+# de siempre (ultimo trade real). "prev_close" reusa el cierre de la ultima
+# vela D1 YA CERRADA (un solo año alcanza, no hace falta pedir el historico
+# completo para esto). "open" necesita la vela D1 de HOY sin filtrar (todavia
+# en formacion: high/low/close en None pero open ya seteado desde la
+# apertura) -- si el mercado no abrio todavia hoy no hay open que devolver.
+def _resolve_current_price(symbol: str, reference: PriceReference) -> float | None:
+    if reference == "prev_close":
+        candles = _fetch_clean_candles(symbol, 1)
+        return candles[-1].close if candles else None
+    if reference == "open":
+        crudas = _client.fetch_candles([symbol], _TIMEFRAME, 2).get(symbol, [])
+        if not crudas:
+            return None
+        vela_hoy = crudas[-1]
+        if vela_hoy.timestamp.date() != datetime.now(timezone.utc).date():
+            return None
+        return vela_hoy.open
+    return _client.fetch_current_prices([symbol]).get(symbol)
+
+
 @router.get("/{symbol}")
 def get_pivots(
     symbol: str, atr_length: int = 14, slip_ratio_pct: float = 0.1,
     longitud_velas: int = 2, anios_historico: int = 4, numero_pivotes: int = 5,
+    price_reference: PriceReference = "live",
 ):
     """Picos/valles de precio cercanos al precio actual de symbol en D1 --
     endpoint de exploracion para dibujar en el chart de Activos, todavia sin
@@ -40,9 +67,12 @@ def get_pivots(
     historial). Los pivotes debiles solo se buscan en el ultimo intento (el
     de historial mas profundo), como relleno final si aun faltan fuertes.
     """
-    current_price = _client.fetch_current_prices([symbol]).get(symbol)
+    current_price = _resolve_current_price(symbol, price_reference)
     if current_price is None:
-        raise HTTPException(status_code=404, detail="No se pudo obtener el precio actual del símbolo")
+        detail = ("No se pudo obtener el precio actual del símbolo" if price_reference == "live"
+                   else "El mercado todavía no abrió hoy" if price_reference == "open"
+                   else "No hay una vela D1 cerrada para este símbolo")
+        raise HTTPException(status_code=404, detail=detail)
 
     atr = None
     resistencias_fuertes: list = []

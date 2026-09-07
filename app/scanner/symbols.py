@@ -429,6 +429,7 @@ class SymbolPipeline:
         symbols_with_data = 0
         total_bars = 0
         null_bars = 0
+        stale_symbols = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=_CANDLE_CHUNK_WORKERS) as executor:
             pending = {executor.submit(fetch_chunk, chunk) for chunk in chunks}
@@ -497,6 +498,7 @@ class SymbolPipeline:
                         # simbolo genuinamente mudo.
                         staleness_limit = timedelta(minutes=max(15, minutos * 2))
                         if datetime.now(timezone.utc) - candles[-1].timestamp > staleness_limit:
+                            stale_symbols += 1
                             continue
                         fund = self._fundamentals.get(sym)
                         data = _make_marketdata(sym, fund, candles, None)
@@ -509,6 +511,12 @@ class SymbolPipeline:
                                 for f in sym_matches
                             )
                             passing.add(sym)
+
+        if stale_symbols > 0:
+            logger.warning(
+                "evaluar_tecnicos %s: %d/%d symbols descartados por vela stale (limite %s)",
+                tf_label, stale_symbols, symbols_with_data, staleness_limit,
+            )
 
         return passing, (symbols_with_data, null_bars, total_bars)
 

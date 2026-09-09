@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import pytest
 from app.scanner.marketdata_models import CandleResponse
-from app.strategies.precio_movimiento import _calc_rsi
+from app.analysis.indicators import calculate_rsi
 
 _NOW = datetime.now(timezone.utc)
 
@@ -17,14 +17,14 @@ def test_rsi_wilder_seed_uses_first_period_candles_not_whole_window():
     # entre la seed de ganancias y la de perdidas).
     closes = [100, 99, 98, 97, 96, 101, 106]
     candles = [_candle(c) for c in closes]
-    assert _calc_rsi(candles, 3) == pytest.approx(86.2068965517)
+    assert calculate_rsi(candles, 3) == pytest.approx(86.2068965517)
 
 
 def test_rsi_no_price_movement_is_neutral():
     candles = [_candle(100) for _ in range(10)]
-    assert _calc_rsi(candles, 3) == 50.0
+    assert calculate_rsi(candles, 3) == 50.0
 
 
 def test_rsi_insufficient_bars_returns_none():
     candles = [_candle(100), _candle(101)]
-    assert _calc_rsi(candles, 14) is None
+    assert calculate_rsi(candles, 14) is None

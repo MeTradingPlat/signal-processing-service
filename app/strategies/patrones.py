@@ -1,18 +1,6 @@
+from app.analysis.indicators import todays_candles
 from app.models.enums import EnumParametro
-from app.scanner.marketdata_models import CandleResponse
 from app.strategies.base import FilterStrategy, MarketData
-
-
-def _todays_candles(candles: list[CandleResponse] | None) -> list[CandleResponse]:
-    """Isola las velas de la sesion de hoy -- varias estrategias de patrones
-    usaban candles[0]/candles[-1] asumiendo que la ventana pedida arrancaba
-    en la apertura del dia, pero es solo "las ultimas N barras", que puede
-    arrancar en cualquier punto (incluso un dia anterior)."""
-    if not candles:
-        return []
-    from datetime import datetime, timezone
-    today = datetime.now(timezone.utc).date()
-    return [c for c in candles if c.timestamp and c.timestamp.date() == today]
 
 
 class BearishBullishEngulfingStrategy(FilterStrategy):
@@ -70,7 +58,7 @@ class FirstCandleStrategy(FilterStrategy):
     para cualquiera de los dos, sin filtrar por la seleccion real)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = _todays_candles(data.candles)
+        todays = todays_candles(data.candles)
         if not todays:
             return None
         first = todays[0]
@@ -92,7 +80,7 @@ class HighLowOfDayStrategy(FilterStrategy):
     minimo)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = _todays_candles(data.candles)
+        todays = todays_candles(data.candles)
         if not todays:
             return None
         if any(c.high is None or c.low is None for c in todays) or todays[-1].close is None:
@@ -195,7 +183,7 @@ class OpeningRangeBreakdownStrategy(FilterStrategy):
     arrancaba en la apertura del dia (podia ser de ayer)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = _todays_candles(data.candles)
+        todays = todays_candles(data.candles)
         if not todays:
             return None
         first = todays[0]
@@ -211,7 +199,7 @@ class OpeningRangeBreakoutStrategy(FilterStrategy):
     OpeningRangeBreakdownStrategy."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = _todays_candles(data.candles)
+        todays = todays_candles(data.candles)
         if not todays:
             return None
         first = todays[0]

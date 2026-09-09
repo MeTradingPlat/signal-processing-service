@@ -1,6 +1,6 @@
+from app.analysis.indicators import calculate_ema, calculate_rsi, calculate_sma, calculate_vwap
 from app.models.enums import EnumParametro
 from app.strategies.base import FilterStrategy, MarketData
-from app.strategies.precio_movimiento import _calc_ema, _calc_rsi, _calc_sma, _calc_vwap
 
 
 class RSIStrategy(FilterStrategy):
@@ -10,7 +10,7 @@ class RSIStrategy(FilterStrategy):
         if not data.candles:
             return None
         period = self._param_int(EnumParametro.PERIODO_RSI, 14)
-        return _calc_rsi(data.candles, period)
+        return calculate_rsi(data.candles, period)
 
 
 class DistanceFromVWAPStrategy(FilterStrategy):
@@ -31,14 +31,14 @@ class DistanceFromVWAPStrategy(FilterStrategy):
         linea = self._param_str(EnumParametro.LINEA_REFERENCIA_DISTANCE_FROM_VWAP_EMA_MA, "VWAP")
         price = data.candles[-1].close
         if linea == "VWAP":
-            ref = _calc_vwap(data.candles)
+            ref = calculate_vwap(data.candles)
         else:
             if any(c.close is None for c in data.candles):
                 return None
             closes = [c.close for c in data.candles]
             default_periodo = 9 if linea == "EMA" else 20
             periodo = self._param_int(EnumParametro.PERIODO_LINEA_DISTANCE_FROM_VWAP_EMA_MA, default_periodo)
-            ref = _calc_ema(closes, periodo) if linea == "EMA" else _calc_sma(closes, periodo)
+            ref = calculate_ema(closes, periodo) if linea == "EMA" else calculate_sma(closes, periodo)
         if ref is None or ref <= 0:
             return None
         modo = self._param_str(EnumParametro.MODO_DISTANCIA_DISTANCE_FROM_VWAP_EMA_MA, "PRECIO")
@@ -67,7 +67,7 @@ class BackToEMAAlertStrategy(FilterStrategy):
             return None
         periodo = self._param_int(EnumParametro.PERIODO_EMA_BACK_TO_EMA, 9)
         closes = [c.close for c in data.candles]
-        ema = _calc_ema(closes, periodo)
+        ema = calculate_ema(closes, periodo)
         if ema <= 0:
             return None
         prev_distance = ((closes[-2] / ema) - 1.0) * 100.0
@@ -94,9 +94,9 @@ class ThroughEMAVWAPAlertStrategy(FilterStrategy):
         periodo = self._param_int(EnumParametro.THROUGH_EMA_VWAP_PERIODO_EMA, 9)
         closes = [c.close for c in data.candles]
         if linea == "VWAP":
-            ref = _calc_vwap(data.candles)
+            ref = calculate_vwap(data.candles)
         else:
-            ref = _calc_ema(closes, periodo)
+            ref = calculate_ema(closes, periodo)
         if ref is None or ref <= 0:
             return None
         prev_close, curr_close = closes[-2], closes[-1]
@@ -129,15 +129,15 @@ class EMAVWAPSupportResistanceStrategy(FilterStrategy):
             # VWAP se mueve lento bar a bar (pondera por todo el volumen del
             # dia), a diferencia de una EMA corta -- una sola foto final es
             # una aproximacion razonable para los 3 puntos.
-            ref1 = ref2 = ref3 = _calc_vwap(data.candles)
+            ref1 = ref2 = ref3 = calculate_vwap(data.candles)
         else:
             # La EMA si cambia bar a bar de forma significativa -- calcularla
             # "tal como estaba" en cada uno de los 3 puntos (con los datos
             # disponibles hasta ese momento), no reusar el valor final para
             # los tres, o la comparacion de lejos/cerca/lejos queda mal.
-            ref1 = _calc_ema(closes[:-2], periodo)
-            ref2 = _calc_ema(closes[:-1], periodo)
-            ref3 = _calc_ema(closes, periodo)
+            ref1 = calculate_ema(closes[:-2], periodo)
+            ref2 = calculate_ema(closes[:-1], periodo)
+            ref3 = calculate_ema(closes, periodo)
         if ref1 is None or ref2 is None or ref3 is None or ref1 <= 0 or ref2 <= 0 or ref3 <= 0:
             return None
         d1 = (closes[-3] / ref1 - 1.0) * 100.0

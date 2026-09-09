@@ -127,18 +127,6 @@ def _publish_signals(escaner: Escaner, signals: dict, nuevos: set):
     kafka_publish(escaner.idEscaner, escaner.nombre, signals, nuevos)
 
 
-def _clear_old_signals(scanner_id: int):
-    try:
-        import urllib.request, json
-        from app.config import settings
-        url = f"{settings.log_service_url}/logs/escaner/{scanner_id}"
-        req = urllib.request.Request(url, headers={"X-Gateway-Passed": "true"}, method="DELETE")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            logger.debug("Cleared old signals for scanner %d: %s", scanner_id, resp.status)
-    except Exception as e:
-        logger.warning("Failed to clear old signals for scanner %d: %s", scanner_id, e)
-
-
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):
     last_date = None
     try:

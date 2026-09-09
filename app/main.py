@@ -9,6 +9,7 @@ import uvicorn
 
 from app.api.server import create_app
 from app.config import settings
+from app.orchestrator.process_termination import terminate_and_reap
 from app.orchestrator.runtime import run_orchestrator
 
 logger = logging.getLogger(__name__)
@@ -80,8 +81,7 @@ def main():
 
     def _shutdown(signum, frame):
         logger.info("Launcher: received signal %d, shutting down", signum)
-        process_holder[0].terminate()
-        process_holder[0].join(timeout=5)
+        terminate_and_reap(process_holder[0], timeout=5)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)

@@ -2,6 +2,8 @@ import logging
 from multiprocessing import Process
 from typing import Dict, List
 
+from app.orchestrator.process_termination import terminate_and_reap
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,11 +30,7 @@ class ProcessRegistry:
             logger.warning("Registry: scanner_id=%d not found for removal", scanner_id)
             return
         if process.is_alive():
-            process.terminate()
-            try:
-                process.join(timeout=3)
-            except AssertionError:
-                pass
+            terminate_and_reap(process, timeout=3)
             logger.info(
                 "Registry: terminated scanner_id=%d pid=%d",
                 scanner_id,

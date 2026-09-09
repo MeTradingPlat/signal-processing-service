@@ -1,6 +1,6 @@
 from app.models.enums import EnumCategoriaFiltro, EnumFiltro
 from app.models.filtro import CategoriaFiltro, Filtro
-from app.scanner.symbols import categorizar_filtros
+from app.scanner.filter_categories import categorizar_filtros
 
 
 def _filtro(enum_filtro: EnumFiltro, categoria: EnumCategoriaFiltro | None) -> Filtro:

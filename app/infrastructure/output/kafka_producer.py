@@ -3,8 +3,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.config import settings
-from app.scanner.symbols import _minutos_to_label
-from app.scanner.timeframe import extraer_timeframe_minutos
+from app.scanner.timeframe import extraer_timeframe_minutos, minutos_to_label
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
             "matches": [
                 {
                     "filtro": sm.filtro.enumFiltro.name,
-                    "timeframe": _minutos_to_label(extraer_timeframe_minutos(sm.filtro)),
+                    "timeframe": minutos_to_label(extraer_timeframe_minutos(sm.filtro)),
                     "velaTimestamp": sm.vela_timestamp.replace(tzinfo=None).isoformat(),
                 }
                 for sm in passed_matches

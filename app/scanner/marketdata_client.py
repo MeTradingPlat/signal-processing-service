@@ -1,9 +1,9 @@
-import gzip
-import json
 import logging
 import re
-import urllib.request
+import time
 from typing import List, Optional
+
+import httpx
 
 from app.config import settings
 from app.scanner.marketdata_models import (
@@ -25,15 +25,11 @@ class MarketdataClient:
     # entirely, along with the extra hop through the gateway.
     def __init__(self):
         self._base = settings.marketdata_url
-
-    def _headers(self) -> dict:
-        # /marketdata/historical/batch devuelve hasta ~9MB de JSON crudo por
-        # lote de 700 simbolos (confirmado en vivo el 2026-08-19) --
-        # Accept-Encoding le dice a marketdata-service que comprima (Echo
-        # gzip middleware). urllib NO descomprime solo aunque el servidor
-        # marque Content-Encoding: gzip (a diferencia de requests/httpx),
-        # ver _request.
-        return {"Content-Type": "application/json", "X-Gateway-Passed": "true", "Accept-Encoding": "gzip"}
+        # httpx descomprime Content-Encoding: gzip solo -- /historical/batch
+        # devuelve hasta ~9MB de JSON crudo por lote de 700 simbolos
+        # (confirmado en vivo el 2026-08-19), a diferencia de urllib esto ya
+        # no necesita un gzip.decompress manual.
+        self._client = httpx.Client(headers={"Content-Type": "application/json", "X-Gateway-Passed": "true"})
 
     # Cuanto espera entre reintentos cuando marketdata esta en refill
     # (503 MAINTENANCE) -- el refill dura ~20-40 min, reintentar cada 60s
@@ -42,34 +38,25 @@ class MarketdataClient:
     _MAINTENANCE_MAX_ATTEMPTS = 60
 
     def _request(self, method: str, path: str, body: Optional[dict] = None, timeout: int = 30) -> dict:
-        import time
-
-        data = json.dumps(body).encode() if body else None
-        req = urllib.request.Request(f"{self._base}{path}", data=data, headers=self._headers(), method=method)
         for attempt in range(1, self._MAINTENANCE_MAX_ATTEMPTS + 1):
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw = resp.read()
-                    if resp.headers.get("Content-Encoding") == "gzip":
-                        raw = gzip.decompress(raw)
-                    return json.loads(raw)
-            except urllib.error.HTTPError as e:
-                # El marketdata-service responde 503 con {"code": "MAINTENANCE",
+            resp = self._client.request(method, f"{self._base}{path}", json=body, timeout=timeout)
+            if resp.status_code == 503:
+                # marketdata-service responde 503 con {"code": "MAINTENANCE",
                 # "message": ...} durante el refill -- esperar con backoff
                 # largo en vez de fallar o martillar.
-                if e.code == 503:
-                    try:
-                        body_resp = json.loads(e.read().decode())
-                        if body_resp.get("code") == "MAINTENANCE":
-                            logger.warning(
-                                "marketdata en mantenimiento (refill), reintento %d/%d en %ds",
-                                attempt, self._MAINTENANCE_MAX_ATTEMPTS, self._MAINTENANCE_RETRY_SECONDS,
-                            )
-                            time.sleep(self._MAINTENANCE_RETRY_SECONDS)
-                            continue
-                    except json.JSONDecodeError:
-                        pass
-                raise
+                try:
+                    body_resp = resp.json()
+                except ValueError:
+                    body_resp = {}
+                if body_resp.get("code") == "MAINTENANCE":
+                    logger.warning(
+                        "marketdata en mantenimiento (refill), reintento %d/%d en %ds",
+                        attempt, self._MAINTENANCE_MAX_ATTEMPTS, self._MAINTENANCE_RETRY_SECONDS,
+                    )
+                    time.sleep(self._MAINTENANCE_RETRY_SECONDS)
+                    continue
+            resp.raise_for_status()
+            return resp.json()
         raise RuntimeError(f"marketdata sigue en mantenimiento tras {self._MAINTENANCE_MAX_ATTEMPTS} intentos")
 
     def is_ready(self) -> bool:

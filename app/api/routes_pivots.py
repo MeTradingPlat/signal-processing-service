@@ -14,7 +14,7 @@ _client = MarketdataClient()
 _TIMEFRAME = "_1D"
 _TRADING_DAYS_PER_YEAR = 252
 
-PriceReference = Literal["live", "open", "prev_close"]
+PriceReference = Literal["live", "open", "prev_close", "signal"]
 
 
 def _fetch_clean_candles(symbol: str, years: int):
@@ -34,7 +34,13 @@ def _fetch_clean_candles(symbol: str, years: int):
 # filtro de _fetch_clean_candles -- si sigue en formacion ya tiene open
 # seteado aunque high/low/close todavia esten en None), "prev_close" es el
 # cierre de la vela INMEDIATA ANTERIOR a esa, este cerrada o no la ultima.
-def _resolve_current_price(symbol: str, reference: PriceReference) -> float | None:
+# "signal" no resuelve nada del mercado -- usa el precio EXACTO al que
+# disparo una senal del escaner (viene del frontend, ver
+# PivotsConfigDialog/symbol-chart.component.ts), asi que exige
+# explicit_price y no tiene sentido si la senal no trae precio.
+def _resolve_current_price(symbol: str, reference: PriceReference, explicit_price: float | None) -> float | None:
+    if reference == "signal":
+        return explicit_price
     if reference == "live":
         return _client.fetch_current_prices([symbol]).get(symbol)
     crudas = _client.fetch_candles([symbol], _TIMEFRAME, 2).get(symbol, [])
@@ -49,7 +55,7 @@ def _resolve_current_price(symbol: str, reference: PriceReference) -> float | No
 def get_pivots(
     symbol: str, atr_length: int = 14, slip_ratio_pct: float = 0.1,
     longitud_velas: int = 2, anios_historico: int = 4, numero_pivotes: int = 5,
-    price_reference: PriceReference = "live",
+    price_reference: PriceReference = "live", explicit_price: float | None = None,
 ):
     """Picos/valles de precio cercanos al precio actual de symbol en D1 --
     endpoint de exploracion para dibujar en el chart de Activos, todavia sin
@@ -63,10 +69,14 @@ def get_pivots(
     historial). Los pivotes debiles solo se buscan en el ultimo intento (el
     de historial mas profundo), como relleno final si aun faltan fuertes.
     """
-    current_price = _resolve_current_price(symbol, price_reference)
+    current_price = _resolve_current_price(symbol, price_reference, explicit_price)
     if current_price is None:
-        detail = ("No se pudo obtener el precio actual del símbolo" if price_reference == "live"
-                   else "No hay suficiente historial D1 para este símbolo")
+        if price_reference == "live":
+            detail = "No se pudo obtener el precio actual del símbolo"
+        elif price_reference == "signal":
+            detail = "La señal no trae un precio para calcular pivots"
+        else:
+            detail = "No hay suficiente historial D1 para este símbolo"
         raise HTTPException(status_code=404, detail=detail)
 
     atr = None

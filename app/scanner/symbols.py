@@ -318,7 +318,8 @@ class SymbolPipeline:
                         # (precio de una vela a medio completar) se corrige
                         # ahi, en la fuente, en vez de adivinar un margen de
                         # tiempo fijo aca.
-                        if candles and candles[-1].timestamp + timedelta(minutes=minutos) > datetime.now(timezone.utc):
+                        now_utc = datetime.now(timezone.utc)
+                        if candles and candles[-1].timestamp + timedelta(minutes=minutos) > now_utc:
                             candles = candles[:-1]
                         total_bars += len(candles)
                         null_bars += sum(
@@ -327,19 +328,9 @@ class SymbolPipeline:
                         )
                         if not candles:
                             continue
-                        # Descartar simbolos con datos congelados: su
-                        # suscripcion en vivo puede seguir "registrada" en
-                        # marketdata-service sin que llegue un solo tick real
-                        # (una muerte silenciosa que ningun watchdog nota hoy,
-                        # ver live_data_watchdog.go) -- evaluar un filtro
-                        # tecnico sobre esa ultima vela real, ya vieja, genera
-                        # una señal falsa y tardia (confirmado en vivo el
-                        # 2026-09-04 con BSV/TW: ultima vela real 30+ min
-                        # antes de la señal). max(15min, 2 periodos) tolera
-                        # el rezago normal de agregacion sin dejar pasar un
-                        # simbolo genuinamente mudo.
-                        staleness_limit = timedelta(minutes=max(15, minutos * 2))
-                        if datetime.now(timezone.utc) - candles[-1].timestamp > staleness_limit:
+                        candle_close_time = candles[-1].timestamp + timedelta(minutes=minutos)
+                        staleness_limit = timedelta(minutes=max(20, minutos * 2))
+                        if now_utc - candle_close_time > staleness_limit:
                             stale_symbols += 1
                             continue
                         fund = self._fundamentals.get(sym)

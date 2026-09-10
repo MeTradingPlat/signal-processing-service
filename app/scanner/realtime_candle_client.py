@@ -68,11 +68,15 @@ class RealtimeCandleClient:
                 import websocket
                 self._ws = websocket.WebSocketApp(
                     self._ws_url,
+                    # marketdata-service exige este header en TODAS sus rutas
+                    # internas (X-Gateway-Passed), incluida /ws/candles -- sin
+                    # el, el handshake devuelve 403 antes de llegar a abrir el
+                    # socket. Confirmado en vivo el 2026-09-10.
+                    header=["X-Gateway-Passed: true"],
                     on_open=lambda ws: self._on_open(),
                     on_message=lambda ws, msg: self._on_message(msg),
                     on_error=lambda ws, err: logger.warning("RealtimeCandleClient: ws error: %s", err),
                 )
-                self._reconnect_attempts = 0
                 self._ws.run_forever(ping_interval=_PING_INTERVAL_SECONDS, ping_timeout=_PING_TIMEOUT_SECONDS)
             except Exception as e:
                 logger.warning("RealtimeCandleClient: connection failed: %s", e)
@@ -84,6 +88,12 @@ class RealtimeCandleClient:
 
     def _on_open(self) -> None:
         logger.info("RealtimeCandleClient: connected to %s", self._ws_url)
+        # Resetear solo en una conexion de verdad exitosa -- antes esto se
+        # reseteaba en cada vuelta del loop ANTES de intentar conectar, asi
+        # que el backoff exponencial nunca crecia (siempre calculaba con
+        # _reconnect_attempts=0): reintentaba cada 3s indefinidamente contra
+        # un servidor caido en vez de espaciarse hasta 30s.
+        self._reconnect_attempts = 0
         with self._lock:
             self._subscribed = set()
         self._sync_subscriptions()

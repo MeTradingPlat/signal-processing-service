@@ -44,15 +44,19 @@ def test_publish_signals_sends_one_log_event_per_symbol(monkeypatch):
     assert value["esSenalNueva"] is True
 
 
-def test_publish_signals_marks_symbol_not_new_when_absent_from_nuevos(monkeypatch):
+def test_publish_signals_skips_symbol_not_in_nuevos(monkeypatch):
+    # Solo se publican simbolos en `nuevos` -- necesario para
+    # Escaner.permitirMultiplesSenales: sin este filtro, un simbolo que
+    # sigue calificando ciclo tras ciclo (ya no excluido por
+    # _excluir_ya_senializados_hoy) publicaria un log nuevo cada ciclo
+    # indefinidamente.
     fake = _FakeProducer()
     monkeypatch.setattr(kafka_producer, "_get_producer", lambda: fake)
 
     signals = {"AAPL": [_signal_match()]}
     kafka_producer.publish_signals(scanner_id=1, scanner_name="test", signals=signals, nuevos=set())
 
-    _, _, value = fake.sent[0]
-    assert value["esSenalNueva"] is False
+    assert fake.sent == []
 
 
 def test_publish_signals_flush_timeout_does_not_raise(monkeypatch):

@@ -3,9 +3,11 @@ import os
 import time as _time
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.models.enums import EnumTipoEjecucion
 from app.models.escaner import Escaner
 from app.models.filtro import Filtro
+from app.models.signal_match import SignalMatch
 from app.scanner.calendar import effective_end, effective_start, is_within_window, next_trading_window
 from app.scanner.symbols import SymbolPipeline
 from app.scanner.timeframe import agrupar_por_timeframe
@@ -14,8 +16,22 @@ logger = logging.getLogger(__name__)
 
 _LONG_SLEEP_SECONDS = 5.0
 _CYCLE_SECONDS = 60.0
-_REALTIME_SECONDS = 1.0
 _BAR_CLOSE_BUFFER_SECONDS = 1.0
+
+
+def _build_realtime_watcher(escaner: Escaner):
+    """None si el escaner no tiene ningun filtro con revisionTiempoReal=true
+    -- evita abrir una conexion WS de mas para el caso comun (todos los
+    escaneres que no usan esta funcionalidad)."""
+    if not any(f.revisionTiempoReal for f in escaner.filtros):
+        return None
+    from app.scanner.realtime_filter_watcher import RealtimeFilterWatcher
+    ws_url = settings.marketdata_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/candles"
+    return RealtimeFilterWatcher(escaner, ws_url, _publish_realtime_signal)
+
+
+def _publish_realtime_signal(escaner: Escaner, symbol: str, match: SignalMatch) -> None:
+    _publish_signals(escaner, {symbol: [match]}, {symbol})
 
 
 def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
@@ -54,6 +70,7 @@ def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
 def run_scanner(escaner: Escaner):
     orchestrator_pid = os.getppid()
     pipeline = SymbolPipeline(escaner)
+    watcher = _build_realtime_watcher(escaner)
 
     logger.info(
         "ScannerRunner: started id=%d name='%s' pid=%d type=%s window=%s-%s pre=%d tec=%d",
@@ -66,13 +83,13 @@ def run_scanner(escaner: Escaner):
     pipeline.cargar_todos()
 
     if escaner.objTipoEjecucion.enumTipoEjecucion == EnumTipoEjecucion.UNA_VEZ:
-        _run_once(escaner, pipeline=pipeline, orchestrator_pid=orchestrator_pid)
+        _run_once(escaner, pipeline=pipeline, orchestrator_pid=orchestrator_pid, watcher=watcher)
     else:
-        _run_daily(escaner, pipeline, orchestrator_pid)
+        _run_daily(escaner, pipeline, orchestrator_pid, watcher=watcher)
 
 
 def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPipeline | None = None,
-              orchestrator_pid: int | None = None):
+              orchestrator_pid: int | None = None, watcher=None):
     if pipeline is None:
         pipeline = SymbolPipeline(escaner)
         pipeline.cargar_todos()
@@ -84,7 +101,11 @@ def _run_once(escaner: Escaner, _now: datetime | None = None, pipeline: SymbolPi
         _sleep_until(window_start, _now)
 
     logger.info("ScannerRunner: UNA_VEZ active id=%d", escaner.idEscaner)
-    _run_loop_until_end(escaner, pipeline, _now, orchestrator_pid)
+    try:
+        _run_loop_until_end(escaner, pipeline, _now, orchestrator_pid, watcher=watcher)
+    finally:
+        if watcher is not None:
+            watcher.stop()
 
     logger.info("ScannerRunner: UNA_VEZ completed id=%d", escaner.idEscaner)
 
@@ -101,7 +122,7 @@ def _reintentar_carga_si_vacia(pipeline: SymbolPipeline):
         pipeline.cargar_todos()
 
 
-def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
+def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, watcher=None):
     logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
     pipeline.aplicar_pre_filtros()
 
@@ -115,6 +136,9 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline):
     signals = pipeline.evaluar_tecnicos(grupos)
     nuevos = pipeline.nuevos_symbols(signals)
     _publish_signals(escaner, signals, nuevos)
+    if watcher is not None:
+        filtros_realtime = [f for f in pipeline.tecnicos if f.revisionTiempoReal]
+        watcher.actualizar(filtros_realtime, pipeline.candidatos_previos_a_grupo)
     if signals:
         logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
                     escaner.idEscaner, len(signals), list(signals.keys())[:5])
@@ -127,7 +151,7 @@ def _publish_signals(escaner: Escaner, signals: dict, nuevos: set):
     kafka_publish(escaner.idEscaner, escaner.nombre, signals, nuevos)
 
 
-def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int):
+def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int, watcher=None):
     last_date = None
     try:
         while True:
@@ -147,7 +171,7 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                         pipeline.renovar_si_nuevo_dia()
                     last_date = now.date()
                 _reintentar_carga_si_vacia(pipeline)
-                _do_cycle(escaner, pipeline)
+                _do_cycle(escaner, pipeline, watcher=watcher)
                 _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))
             else:
                 if last_date is not None:
@@ -167,10 +191,13 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     wait = (next_run - datetime.now(timezone.utc)).total_seconds()
     except KeyboardInterrupt:
         logger.info("ScannerRunner: interrupted id=%d", escaner.idEscaner)
+    finally:
+        if watcher is not None:
+            watcher.stop()
 
 
 def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: datetime | None = None,
-                         orchestrator_pid: int | None = None):
+                         orchestrator_pid: int | None = None, watcher=None):
     while True:
         # Mismo chequeo que _run_daily -- sin esto, un escaner UNA_VEZ
         # sobrevive a la muerte del orquestador (que restaura su propio
@@ -187,7 +214,7 @@ def _run_loop_until_end(escaner: Escaner, pipeline: SymbolPipeline, _now: dateti
         if now.time() >= end or not is_within_window(now, start, end):
             return
         _reintentar_carga_si_vacia(pipeline)
-        _do_cycle(escaner, pipeline)
+        _do_cycle(escaner, pipeline, watcher=watcher)
         if _now is not None:
             return
         _time.sleep(_next_cycle_delay(pipeline, datetime.now(timezone.utc)))

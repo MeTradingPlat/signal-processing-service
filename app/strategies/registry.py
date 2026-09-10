@@ -15,6 +15,9 @@ def get_strategy(filtro: Filtro) -> FilterStrategy:
         BackToEMAAlertStrategy, DistanceFromEMAStrategy, DistanceFromMAStrategy,
         DistanceFromVWAPStrategy, EMAVWAPSupportResistanceStrategy,
         RSIStrategy, ThroughEMAVWAPAlertStrategy)
+    from app.strategies.liquidity_inducement import (
+        AccelerationDecelerationStrategy, ConfirmationCandleStrategy,
+        LiquidityGrabCandleStrategy, OrderBlockImbalanceStrategy)
     from app.strategies.patrones import (
         BearishBullishEngulfingStrategy, BreakOverRecentHighsLowsStrategy,
         ConsecutiveCandlesStrategy, FirstCandleStrategy, HighLowOfDayStrategy,
@@ -69,6 +72,10 @@ def get_strategy(filtro: Filtro) -> FilterStrategy:
         "OPENING_RANGE_BREAKOUT": OpeningRangeBreakoutStrategy,
         "PIVOTS": PivotsStrategy,
         "MINUTOS_IN_MARKET": MinutosInMarketStrategy,
+        "ORDER_BLOCK_IMBALANCE": OrderBlockImbalanceStrategy,
+        "LIQUIDITY_GRAB_CANDLE": LiquidityGrabCandleStrategy,
+        "ACCELERATION_DECELERATION": AccelerationDecelerationStrategy,
+        "CONFIRMATION_CANDLE": ConfirmationCandleStrategy,
         "FLOAT": FloatStrategy,
         "SHARES_OUTSTANDING": SharesOutstandingStrategy,
         "MARKET_CAP": MarketCapStrategy,

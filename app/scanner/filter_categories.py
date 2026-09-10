@@ -78,6 +78,12 @@ _REQUIERE_VELAS: set[EnumFiltro] = {
     EnumFiltro.BREAK_OVER_RECENT_HIGHS_LOWS,
     EnumFiltro.HIGH_LOW_OF_DAY,
     EnumFiltro.PERCENTAGE_PULLBACK_HIGHS_LOWS,
+    # Estrategia "Liquidity Inducement" (ICT/SMC) -- las 4 leen candles
+    # directo (rango, mecha/cuerpo, imbalance de 3 y 2 velas).
+    EnumFiltro.ORDER_BLOCK_IMBALANCE,
+    EnumFiltro.LIQUIDITY_GRAB_CANDLE,
+    EnumFiltro.ACCELERATION_DECELERATION,
+    EnumFiltro.CONFIRMATION_CANDLE,
 }
 
 

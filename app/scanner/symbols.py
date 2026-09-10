@@ -49,6 +49,7 @@ class SymbolPipeline:
         log_service_client: Optional[LogServiceClient] = None,
     ):
         self.scanner_id = escaner.idEscaner
+        self.permitir_multiples_senales = escaner.permitirMultiplesSenales
         self.mercados = [m.enumMercado.value for m in escaner.mercados]
         self.pre_estaticos, self.pre_dinamicos, self.tecnicos = categorizar_filtros(escaner.filtros)
         self._todos: List[str] = []
@@ -66,6 +67,12 @@ class SymbolPipeline:
         self._log_client = log_service_client or LogServiceClient()
         self._fundamentals: Dict[str, FundamentalResponse] = {}
         self._signaled_today: set = set()
+        # Candidatos que sobrevivieron a todos los grupos evaluados ANTES de
+        # cada temporalidad, poblado en cada evaluar_tecnicos -- lo usa
+        # RealtimeFilterWatcher (runner.py) para saber a que simbolos
+        # suscribirse en /ws/candles para los filtros con
+        # revisionTiempoReal=true de esa temporalidad.
+        self.candidatos_previos_a_grupo: dict[int, set] = {}
         self._previously_matched: set = set()
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
@@ -188,8 +195,16 @@ class SymbolPipeline:
         este escaner y los saca de _filtrados. Sin esto, el mismo simbolo
         genera senal en cada ciclo del dia -- el usuario quiere una sola senal
         por simbolo por dia por escaner. La lista se refresca en cada ciclo
-        para cubrir simbolos que se senializaron en ciclos anteriores de hoy."""
-        if not self._filtrados:
+        para cubrir simbolos que se senializaron en ciclos anteriores de hoy.
+
+        Si el escaner tiene permitirMultiplesSenales=true, esta exclusion se
+        salta por completo -- kafka_producer.publish_signals ya solo publica
+        `nuevos` (ver runner.py/_publish_signals), asi que un simbolo que
+        sigue calificando sin interrupcion no se re-publica cada ciclo; lo
+        que si vuelve a pasar es que si deja de calificar y despues vuelve a
+        calificar el mismo dia, esa segunda vez cuenta como nueva senal
+        (via nuevos_symbols/_previously_matched)."""
+        if not self._filtrados or self.permitir_multiples_senales:
             return
         try:
             self._signaled_today = self._log_client.get_signaled_today(self.scanner_id)
@@ -205,8 +220,10 @@ class SymbolPipeline:
     def evaluar_tecnicos(self, grupos: dict[int, list[Filtro]]) -> dict[str, list[SignalMatch]]:
         candidates = set(self._filtrados)
         matched: dict[str, list[SignalMatch]] = {sym: [] for sym in candidates}
+        self.candidatos_previos_a_grupo = {}
 
         for minutos, filtros in grupos.items():
+            self.candidatos_previos_a_grupo[minutos] = set(candidates)
             if not candidates:
                 break
             tf_label = minutos_to_label(minutos)

@@ -92,6 +92,10 @@ _TIMEFRAME_PARAMS: dict[EnumFiltro, EnumParametro] = {
     EnumFiltro.OPENING_RANGE_BREAKOUT: EnumParametro.TIMEFRAME_OPENING_RANGE_BREAKOUT,
     EnumFiltro.OPENING_RANGE_BREAKDOWN: EnumParametro.TIMEFRAME_OPENING_RANGE_BREAKDOWN,
     EnumFiltro.PIVOTS: EnumParametro.TIMEFRAME_PIVOTS,
+    EnumFiltro.ORDER_BLOCK_IMBALANCE: EnumParametro.TIMEFRAME_ORDER_BLOCK_IMBALANCE,
+    EnumFiltro.LIQUIDITY_GRAB_CANDLE: EnumParametro.TIMEFRAME_LIQUIDITY_GRAB_CANDLE,
+    EnumFiltro.ACCELERATION_DECELERATION: EnumParametro.TIMEFRAME_ACCELERATION_DECELERATION,
+    EnumFiltro.CONFIRMATION_CANDLE: EnumParametro.TIMEFRAME_CONFIRMATION_CANDLE,
 }
 
 
@@ -150,6 +154,19 @@ def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
         return periodo * margen
     if enum_filtro == EnumFiltro.CONSECUTIVE_CANDLES:
         return _leer_periodo(filtro, EnumParametro.NUMERO_VELAS_CONSECUTIVAS, 3) + 1
+    # Estrategia "Liquidity Inducement": lookbacks configurables por el
+    # usuario, no un periodo de indicador (no encajan en _PERIOD_PARAMS,
+    # que multiplica por un margen de convergencia tipo EMA/RSI).
+    if enum_filtro == EnumFiltro.ORDER_BLOCK_IMBALANCE:
+        return _leer_periodo(filtro, EnumParametro.LOOKBACK_VELAS_ORDER_BLOCK_IMBALANCE, 20) + 2
+    if enum_filtro == EnumFiltro.LIQUIDITY_GRAB_CANDLE:
+        return _leer_periodo(filtro, EnumParametro.LOOKBACK_VELAS_LIQUIDITY_GRAB_CANDLE, 10) + 1
+    if enum_filtro == EnumFiltro.ACCELERATION_DECELERATION:
+        n_acel = _leer_periodo(filtro, EnumParametro.VELAS_ACELERACION_ACCELERATION_DECELERATION, 4)
+        n_desacel = _leer_periodo(filtro, EnumParametro.VELAS_DESACELERACION_ACCELERATION_DECELERATION, 2)
+        return n_acel + n_desacel
+    if enum_filtro == EnumFiltro.CONFIRMATION_CANDLE:
+        return 2
     if enum_filtro in _FIXED_LOOKBACK:
         return _FIXED_LOOKBACK[enum_filtro]
     if enum_filtro in _DAY_ANCHORED:

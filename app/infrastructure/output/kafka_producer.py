@@ -40,8 +40,18 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
     # es un log historico append-only, a diferencia del extinto topico
     # "signals" (estado actual, se limpiaba cada ciclo) que solo alimentaba
     # la pestaña "Activos" ya eliminada junto con asset-management-service.
+    # Publicar solo `nuevos` (no todo `signals`) -- antes esto confiaba en
+    # que _excluir_ya_senializados_hoy siempre hubiera sacado de `signals`
+    # cualquier simbolo ya logueado hoy, lo cual dejo de ser cierto con
+    # Escaner.permitirMultiplesSenales=true (ver symbols.py): sin este
+    # filtro, un simbolo que sigue calificando ciclo tras ciclo publicaria
+    # un log nuevo cada ~60-70s indefinidamente en vez de solo cuando
+    # vuelve a calificar tras haber dejado de hacerlo.
     signal_count = 0
-    for symbol, passed_matches in signals.items():
+    for symbol in nuevos:
+        passed_matches = signals.get(symbol)
+        if not passed_matches:
+            continue
         filtros_nombres = ", ".join([sm.filtro.enumFiltro.name for sm in passed_matches])
         # Sin matches tecnicos (escaner armado solo con pre-filtros, ver
         # runner.py) "cumple " quedaria colgado sin nada despues.
@@ -72,7 +82,8 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
             "categoria": "SIGNAL",
             "timestamp": now,
             "metadatos": metadatos_json,
-            "esSenalNueva": symbol in nuevos,
+            # Siempre True: el bucle de arriba ya itera solo sobre `nuevos`.
+            "esSenalNueva": True,
         }
         try:
             if producer and producer is not False:

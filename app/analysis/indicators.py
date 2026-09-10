@@ -138,3 +138,37 @@ def volumes_or_zero(candles: list[CandleResponse]) -> list[float]:
     (confirmado en vivo el 2026-09-08 con CTAS, ver AverageVolumeStrategy/
     RelativeVolumeStrategy)."""
     return [c.volume or 0 for c in candles]
+
+
+def body_size(c: CandleResponse) -> float:
+    return abs(c.close - c.open)
+
+
+def candle_range(c: CandleResponse) -> float:
+    return c.high - c.low
+
+
+def upper_wick(c: CandleResponse) -> float:
+    return c.high - max(c.open, c.close)
+
+
+def lower_wick(c: CandleResponse) -> float:
+    return min(c.open, c.close) - c.low
+
+
+def is_bullish(c: CandleResponse) -> bool:
+    return c.close > c.open
+
+
+def is_bearish(c: CandleResponse) -> bool:
+    return c.close < c.open
+
+
+def has_fair_value_gap(prev: CandleResponse, next_: CandleResponse, alcista: bool) -> bool:
+    """Imbalance/FVG de 3 velas (definicion estandar ICT): un hueco entre la
+    vela anterior y la posterior a la del medio que ningun cuerpo llego a
+    cubrir. `prev`/`next_` son las velas 1 y 3 de la ventana de 3; la del
+    medio no participa del calculo mas alla de estar entre ambas."""
+    if alcista:
+        return prev.high < next_.low
+    return prev.low > next_.high

@@ -17,3 +17,4 @@ class Filtro(BaseModel):
     etiquetaDescripcion: Optional[str] = None
     objCategoria: Optional[CategoriaFiltro] = None
     parametros: List[Parametro] = Field(default_factory=list)
+    revisionTiempoReal: bool = False

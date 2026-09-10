@@ -20,3 +20,4 @@ class Escaner(BaseModel):
     objTipoEjecucion: Optional[TipoEjecucion] = None
     mercados: List[Mercado] = Field(default_factory=list)
     filtros: List[Filtro] = Field(default_factory=list)
+    permitirMultiplesSenales: bool = False

@@ -172,3 +172,80 @@ def has_fair_value_gap(prev: CandleResponse, next_: CandleResponse, alcista: boo
     if alcista:
         return prev.high < next_.low
     return prev.low > next_.high
+
+
+def near_zone(precio: float, zona: tuple[float, float], candles: list[CandleResponse],
+              factor: float = 0.5, k: float = 1.0) -> bool:
+    """precio cae dentro de zona=(low, high), expandida por una tolerancia
+    que combina el tamano de la propia zona con la volatilidad reciente del
+    simbolo -- una zona muy angosta (FVG de una sola vela) no exige un toque
+    exacto, y una zona muy ancha (rango D1) no se vuelve tan permisiva que
+    acepte cualquier precio cercano. Sin esto, el requisito de "ocurre en la
+    zona" seria demasiado estricto o demasiado laxo segun el instrumento."""
+    low, high = sorted(zona)
+    altura = high - low
+    rangos = [candle_range(c) for c in candles[-5:] if c.high is not None and c.low is not None]
+    promedio_rango = sum(rangos) / len(rangos) if rangos else 0.0
+    tolerancia = max(factor * altura, k * promedio_rango)
+    return (low - tolerancia) <= precio <= (high + tolerancia)
+
+
+def zonas_cercanas(zona_nueva: tuple[float, float], zona_referencia: tuple[float, float],
+                    candles: list[CandleResponse], factor: float = 0.5, k: float = 1.0) -> bool:
+    """zona_nueva se solapa con zona_referencia una vez que esta se expande
+    con la misma tolerancia de near_zone -- usado para "refinar" (un Order
+    Block en M15 cerca del Order Block de H1 encontrado antes) y para
+    confluencia entre temporalidades."""
+    low_n, high_n = sorted(zona_nueva)
+    low_r, high_r = sorted(zona_referencia)
+    altura_r = high_r - low_r
+    rangos = [candle_range(c) for c in candles[-5:] if c.high is not None and c.low is not None]
+    promedio_rango = sum(rangos) / len(rangos) if rangos else 0.0
+    tolerancia = max(factor * altura_r, k * promedio_rango)
+    return not (high_n < low_r - tolerancia or low_n > high_r + tolerancia)
+
+
+def swing_range(candles: list[CandleResponse], confirmacion_velas: int = 2) -> tuple[float, float] | None:
+    """Rango de estructura causal (nunca mira al futuro, valido para
+    escaneo en vivo): sigue un swing high y un swing low vigentes; cada uno
+    se CONFIRMA cuando el precio retrocede al menos `confirmacion_velas`
+    sin superarlo, y al confirmarse, el lado OPUESTO se actualiza al
+    extremo mas fuerte alcanzado desde la ultima confirmacion -- el rango
+    "se mueve", en vez de acumular el maximo/minimo de toda la ventana sin
+    distincion (que es lo que hacia la version anterior, una simple
+    ventana rodante)."""
+    validas = [c for c in candles if c.high is not None and c.low is not None]
+    if len(validas) < confirmacion_velas + 1:
+        return None
+
+    swing_high = validas[0].high
+    swing_low = validas[0].low
+    velas_desde_max = 0
+    velas_desde_min = 0
+    low_desde_max = validas[0].low
+    high_desde_min = validas[0].high
+
+    for c in validas[1:]:
+        high_previo, low_previo = swing_high, swing_low
+
+        if c.high > high_previo:
+            swing_high = c.high
+            velas_desde_max = 0
+            low_desde_max = c.low
+        else:
+            velas_desde_max += 1
+            low_desde_max = min(low_desde_max, c.low)
+            if velas_desde_max == confirmacion_velas:
+                swing_low = low_desde_max
+
+        if c.low < low_previo:
+            swing_low = c.low
+            velas_desde_min = 0
+            high_desde_min = c.high
+        else:
+            velas_desde_min += 1
+            high_desde_min = max(high_desde_min, c.high)
+            if velas_desde_min == confirmacion_velas:
+                swing_high = high_desde_min
+
+    return (swing_low, swing_high)

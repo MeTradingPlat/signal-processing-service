@@ -138,7 +138,7 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, watcher=None):
     _publish_signals(escaner, signals, nuevos)
     if watcher is not None:
         filtros_realtime = [f for f in pipeline.tecnicos if f.revisionTiempoReal]
-        watcher.actualizar(filtros_realtime, pipeline.candidatos_previos_a_grupo)
+        watcher.actualizar(filtros_realtime, pipeline.candidatos_previos_a_grupo, pipeline.zonas)
     if signals:
         logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
                     escaner.idEscaner, len(signals), list(signals.keys())[:5])

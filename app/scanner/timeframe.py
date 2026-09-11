@@ -96,6 +96,7 @@ _TIMEFRAME_PARAMS: dict[EnumFiltro, EnumParametro] = {
     EnumFiltro.LIQUIDITY_GRAB_CANDLE: EnumParametro.TIMEFRAME_LIQUIDITY_GRAB_CANDLE,
     EnumFiltro.ACCELERATION_DECELERATION: EnumParametro.TIMEFRAME_ACCELERATION_DECELERATION,
     EnumFiltro.CONFIRMATION_CANDLE: EnumParametro.TIMEFRAME_CONFIRMATION_CANDLE,
+    EnumFiltro.RANGE_EXTREME_PROXIMITY: EnumParametro.TIMEFRAME_RANGE_EXTREME_PROXIMITY,
 }
 
 
@@ -167,6 +168,8 @@ def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
         return n_acel + n_desacel
     if enum_filtro == EnumFiltro.CONFIRMATION_CANDLE:
         return 2
+    if enum_filtro == EnumFiltro.RANGE_EXTREME_PROXIMITY:
+        return _leer_periodo(filtro, EnumParametro.LOOKBACK_VELAS_RANGE_EXTREME_PROXIMITY, 20)
     if enum_filtro in _FIXED_LOOKBACK:
         return _FIXED_LOOKBACK[enum_filtro]
     if enum_filtro in _DAY_ANCHORED:

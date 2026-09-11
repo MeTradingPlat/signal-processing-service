@@ -81,6 +81,35 @@ class AccelerationDecelerationStrategy(FilterStrategy):
         return 1.0 if desacel_avg <= proporcion * acel_avg else 0.0
 
 
+class RangeExtremeProximityStrategy(FilterStrategy):
+    """Verifica que el precio actual este cerca del extremo (maximo o
+    minimo) del rango formado por las ultimas LOOKBACK_VELAS velas -- el
+    contexto de 'Rango D1/H4/H1' del video, la referencia que le da sentido
+    a que un Order Block ubicado en ese extremo sea un POI real y no una
+    coincidencia."""
+
+    def compute_value(self, data: MarketData) -> float | None:
+        lookback = self._param_int(EnumParametro.LOOKBACK_VELAS_RANGE_EXTREME_PROXIMITY, 20)
+        if not data.candles or len(data.candles) < lookback:
+            return None
+        window = data.candles[-lookback:]
+        if any(c.high is None or c.low is None for c in window):
+            return None
+        range_high = max(c.high for c in window)
+        range_low = min(c.low for c in window)
+        rango = range_high - range_low
+        if rango <= 0:
+            return None
+        curr = data.candles[-1]
+        if curr.close is None:
+            return None
+        proporcion = self._param_float(EnumParametro.PROPORCION_PROXIMIDAD_RANGE_EXTREME_PROXIMITY, 0.15)
+        alcista = self._param_str(EnumParametro.DIRECCION_RANGE_EXTREME_PROXIMITY, "ALCISTA") == "ALCISTA"
+        if alcista:
+            return 1.0 if (curr.close - range_low) <= proporcion * rango else 0.0
+        return 1.0 if (range_high - curr.close) <= proporcion * rango else 0.0
+
+
 class ConfirmationCandleStrategy(FilterStrategy):
     """Vela de confirmacion ('vela de poder'): cuerpo/rango >=
     PROPORCION_CUERPO_MINIMA que ademas deja un imbalance de 2 velas contra

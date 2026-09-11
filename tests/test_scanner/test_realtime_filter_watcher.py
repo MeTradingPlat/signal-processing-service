@@ -80,13 +80,14 @@ def test_bar_cerrada_que_confirma_publica_senal():
     filtro = _filtro_confirmation_candle()
     watcher.actualizar([filtro], candidatos_previos_a_grupo={1: {"AAPL"}})
 
+    # 3 velas: imbalance de 3 velas (igual que Order Block) entre la 1 y la
+    # 3, mas vela de poder en la 3 (cuerpo/rango >= 0.5, sin solape con la 1).
     watcher._client.on_history("AAPL", "M1", [
         {"time": 1_700_000_000, "open": 10, "high": 10, "low": 9, "close": 9.5, "closed": True},
+        {"time": 1_700_000_060, "open": 9.5, "high": 10.5, "low": 9.5, "close": 10, "closed": True},
     ])
-    # Vela de poder alcista: cuerpo/rango >= 0.5 y sin solape con la anterior
-    # (low > prev.high).
     watcher._client.on_bar("AAPL", "M1", {
-        "time": 1_700_000_060, "open": 11, "high": 15, "low": 11, "close": 15, "closed": True,
+        "time": 1_700_000_120, "open": 11, "high": 15, "low": 11, "close": 15, "closed": True,
     })
 
     assert len(published) == 1
@@ -103,10 +104,11 @@ def test_bar_cerrada_que_no_confirma_no_publica():
 
     watcher._client.on_history("AAPL", "M1", [
         {"time": 1_700_000_000, "open": 10, "high": 10, "low": 9, "close": 9.5, "closed": True},
+        {"time": 1_700_000_060, "open": 9.5, "high": 10.5, "low": 9.5, "close": 10, "closed": True},
     ])
     # Cuerpo chico, no supera la proporcion minima configurada (0.5).
     watcher._client.on_bar("AAPL", "M1", {
-        "time": 1_700_000_060, "open": 11, "high": 15, "low": 9, "close": 11.5, "closed": True,
+        "time": 1_700_000_120, "open": 11, "high": 15, "low": 9, "close": 11.5, "closed": True,
     })
 
     assert published == []

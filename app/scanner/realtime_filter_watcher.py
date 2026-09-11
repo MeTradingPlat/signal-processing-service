@@ -38,10 +38,17 @@ class RealtimeFilterWatcher:
         self._publish_signal = publish_signal
         self._filtros_por_timeframe: dict[str, list[Filtro]] = {}
         self._candles: dict[tuple[str, str], list[CandleResponse]] = {}
+        self._zonas: dict[str, tuple[float, float]] = {}
         self._client = client_factory(ws_url, self._on_history, self._on_bar)
 
-    def actualizar(self, filtros_realtime: list[Filtro], candidatos_previos_a_grupo: dict[int, set]) -> None:
+    def actualizar(self, filtros_realtime: list[Filtro], candidatos_previos_a_grupo: dict[int, set],
+                   zonas: dict[str, tuple[float, float]] | None = None) -> None:
         self._filtros_por_timeframe = {}
+        # Foto de las zonas del ultimo ciclo batch (SymbolPipeline.zonas) --
+        # sin esto, un filtro zona-aware con revisionTiempoReal=true (ej.
+        # CONFIRMATION_CANDLE) evaluaria siempre sin restriccion de zona por
+        # este camino, aunque el resto del embudo si la tenga.
+        self._zonas = dict(zonas) if zonas else {}
         keys: set[tuple[str, str]] = set()
         for filtro in filtros_realtime:
             minutos = extraer_timeframe_minutos(filtro)
@@ -63,7 +70,7 @@ class RealtimeFilterWatcher:
         candles.append(_to_candle(symbol, bar))
         del candles[:-_MAX_BUFFERED_BARS]
 
-        data = MarketData(symbol=symbol, candles=candles)
+        data = MarketData(symbol=symbol, candles=candles, zona=self._zonas.get(symbol))
         for filtro in self._filtros_por_timeframe.get(timeframe, []):
             if not get_strategy(filtro).evaluate(data):
                 continue

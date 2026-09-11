@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from app.adapters.log_service_client import LogServiceClient
+from app.models.enums import EnumFiltro
 from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
@@ -31,14 +32,25 @@ _FETCH_SYMBOLS_RETRY_BACKOFF_SECONDS = 3.0
 _CANDLE_CHUNK_SIZE = 700
 _CANDLE_CHUNK_WORKERS = 2
 
+# RangeConfluenceStrategy es el unico filtro que necesita mas de una
+# temporalidad a la vez (D1 propia del grupo + H4/H1 "extra") -- un lookback
+# fijo y chico basta para su swing_range, no el piso de bars_necesarias_grupo
+# (pensado para la temporalidad propia del grupo, que en D1 pide miles de
+# barras por el margen minutos*2).
+_TIMEFRAMES_CONFLUENCIA_EXTRA = ("H4", "H1")
+_BARS_CONFLUENCIA_EXTRA = 50
+
 
 def _make_marketdata(
     symbol: str,
     fund: Optional[FundamentalResponse] = None,
     candles: Optional[List[CandleResponse]] = None,
     snapshot: Optional[PriceSnapshot] = None,
+    zona: Optional[tuple] = None,
+    velas_extra: Optional[Dict[str, List[CandleResponse]]] = None,
 ) -> MarketData:
-    return MarketData(symbol=symbol, fundamental=fund, candles=candles, snapshot=snapshot)
+    return MarketData(symbol=symbol, fundamental=fund, candles=candles, snapshot=snapshot, zona=zona,
+                       velas_extra=velas_extra)
 
 
 class SymbolPipeline:
@@ -73,6 +85,12 @@ class SymbolPipeline:
         # suscribirse en /ws/candles para los filtros con
         # revisionTiempoReal=true de esa temporalidad.
         self.candidatos_previos_a_grupo: dict[int, set] = {}
+        # Zona de precio (low, high) descubierta para cada simbolo por el
+        # ultimo filtro "productor de zona" (Order Block, Range Extreme
+        # Proximity) que paso su grupo -- ver evaluar_tecnicos. Publica (sin
+        # guion bajo) para que RealtimeFilterWatcher/runner.py la lea igual
+        # que candidatos_previos_a_grupo.
+        self.zonas: dict[str, tuple[float, float]] = {}
         self._previously_matched: set = set()
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
@@ -221,8 +239,19 @@ class SymbolPipeline:
         candidates = set(self._filtrados)
         matched: dict[str, list[SignalMatch]] = {sym: [] for sym in candidates}
         self.candidatos_previos_a_grupo = {}
+        # Resetear en cada ciclo, no solo en __init__: sin esto, la zona de
+        # un simbolo que ya no tiene un Order Block vigente este ciclo
+        # arrastraria la del ciclo anterior y se colaria como restriccion en
+        # el primer grupo (que deberia evaluar sin ninguna zona todavia).
+        self.zonas = {}
 
-        for minutos, filtros in grupos.items():
+        # Ordenado de mayor a menor temporalidad: el encadenamiento de zona
+        # exige que un grupo mas amplio (H4/H1) se evalue ANTES que uno mas
+        # fino (M15, M1/M3) para que la zona le llegue -- el orden de
+        # insercion de `grupos` (agrupar_por_timeframe) solo refleja como el
+        # usuario agrego los filtros al escaner, no el tamano real de cada
+        # temporalidad.
+        for minutos, filtros in sorted(grupos.items(), key=lambda kv: -kv[0]):
             self.candidatos_previos_a_grupo[minutos] = set(candidates)
             if not candidates:
                 break
@@ -260,6 +289,13 @@ class SymbolPipeline:
         batch = list(candidates)
         chunks = [batch[i:i + _CANDLE_CHUNK_SIZE] for i in range(0, len(batch), _CANDLE_CHUNK_SIZE)]
 
+        # RangeConfluenceStrategy necesita H4/H1 ademas de la temporalidad
+        # propia del grupo -- costo adicional que solo paga un escaner que
+        # use ese filtro explicitamente (ver _fetch_velas_extra).
+        velas_extra_por_simbolo: Dict[str, Dict[str, List[CandleResponse]]] = {}
+        if any(f.enumFiltro == EnumFiltro.RANGE_CONFLUENCE_D1_H4_H1 for f in filtros):
+            velas_extra_por_simbolo = self._fetch_velas_extra(batch)
+
         def fetch_chunk(chunk: list[str]) -> dict[str, list[CandleResponse]]:
             try:
                 return self._client.fetch_candles(chunk, tf_label, bars=bars_needed)
@@ -273,6 +309,11 @@ class SymbolPipeline:
         null_bars = 0
         stale_symbols = 0
 
+        # self.zonas se muta mas abajo sin lock a proposito: los workers de
+        # este ThreadPoolExecutor solo hacen fetch_chunk (I/O puro, no tocan
+        # self.zonas), toda la evaluacion de estrategias y la escritura de
+        # zonas ocurre despues, secuencialmente, en este mismo hilo principal
+        # dentro del `for future in done` de abajo -- no hay carrera real.
         with concurrent.futures.ThreadPoolExecutor(max_workers=_CANDLE_CHUNK_WORKERS) as executor:
             pending = {executor.submit(fetch_chunk, chunk) for chunk in chunks}
             # as_completed(futures) NO suelta cada Future al procesarlo -- el
@@ -334,8 +375,15 @@ class SymbolPipeline:
                             stale_symbols += 1
                             continue
                         fund = self._fundamentals.get(sym)
-                        data = _make_marketdata(sym, fund, candles, None)
-                        sym_matches = [f for f in filtros if get_strategy(f).evaluate(data)]
+                        data = _make_marketdata(sym, fund, candles, None, self.zonas.get(sym),
+                                                 velas_extra_por_simbolo.get(sym))
+                        # Instancias construidas una sola vez por simbolo (no
+                        # un dict keyed por Filtro -- el modelo pydantic no es
+                        # hashable): se reusan tanto para evaluar como para
+                        # leer la zona despues, evitando reconstruir y
+                        # re-escanear el Order Block por segunda vez.
+                        pares = [(f, get_strategy(f)) for f in filtros]
+                        sym_matches = [f for f, estrategia in pares if estrategia.evaluate(data)]
                         if len(sym_matches) == len(filtros):
                             vela_timestamp = candles[-1].timestamp
                             precio = candles[-1].close
@@ -344,6 +392,14 @@ class SymbolPipeline:
                                 for f in sym_matches
                             )
                             passing.add(sym)
+                            # Si algun filtro de este grupo produjo una zona
+                            # (Order Block, Range Extreme Proximity), queda
+                            # disponible para los grupos siguientes (mas
+                            # finos) via self.zonas -- ver evaluar_tecnicos.
+                            for _f, estrategia in pares:
+                                zona = getattr(estrategia, "ultima_zona", None)
+                                if zona is not None:
+                                    self.zonas[sym] = zona
 
         if stale_symbols > 0:
             logger.warning(
@@ -352,6 +408,27 @@ class SymbolPipeline:
             )
 
         return passing, (symbols_with_data, null_bars, total_bars)
+
+    def _fetch_velas_extra(self, symbols: list[str]) -> Dict[str, Dict[str, List[CandleResponse]]]:
+        """Velas de H4 y H1 para RangeConfluenceStrategy, ademas de la
+        temporalidad propia del grupo (D1) -- el unico filtro de la
+        plataforma que necesita mas de una temporalidad a la vez. Secuencial
+        y con un `bars` chico a proposito: no vale la pena la maquinaria de
+        streaming/concurrencia de _evaluar_grupo_tecnico (pensada para
+        cientos de barras sobre miles de simbolos) para un puñado de barras
+        que solo paga el escaner que use este filtro."""
+        resultado: Dict[str, Dict[str, List[CandleResponse]]] = {}
+        chunks = [symbols[i:i + _CANDLE_CHUNK_SIZE] for i in range(0, len(symbols), _CANDLE_CHUNK_SIZE)]
+        for tf_label in _TIMEFRAMES_CONFLUENCIA_EXTRA:
+            for chunk in chunks:
+                try:
+                    candles_map = self._client.fetch_candles(chunk, tf_label, bars=_BARS_CONFLUENCIA_EXTRA)
+                except Exception as e:
+                    logger.error("Failed to fetch extra timeframe %s for confluence: %s", tf_label, e)
+                    continue
+                for sym, candles in candles_map.items():
+                    resultado.setdefault(sym, {})[tf_label] = candles
+        return resultado
 
     def renovar_si_nuevo_dia(self):
         logger.info("SymbolPipeline: daily refresh, reloading symbols and static filters")

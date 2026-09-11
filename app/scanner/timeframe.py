@@ -101,6 +101,11 @@ _TIMEFRAME_PARAMS: dict[EnumFiltro, EnumParametro] = {
 
 
 def extraer_timeframe_minutos(filtro: Filtro) -> int:
+    # Sin parametro de timeframe propio -- D1 es su temporalidad "base"
+    # (la mas amplia de las 3 que compara), asi entra en el grupo mas
+    # grueso del embudo en vez de caer en el default de M1.
+    if filtro.enumFiltro == EnumFiltro.RANGE_CONFLUENCE_D1_H4_H1:
+        return _TIMEFRAME_MINUTES["1D"]
     param_enum = _TIMEFRAME_PARAMS.get(filtro.enumFiltro)
     if param_enum is None:
         return 1
@@ -167,9 +172,13 @@ def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
         n_desacel = _leer_periodo(filtro, EnumParametro.VELAS_DESACELERACION_ACCELERATION_DECELERATION, 2)
         return n_acel + n_desacel
     if enum_filtro == EnumFiltro.CONFIRMATION_CANDLE:
-        return 2
+        # Imbalance de 3 velas (igual que Order Block) + vela de poder,
+        # ya no un gap de 2 velas contra la anterior.
+        return 3
     if enum_filtro == EnumFiltro.RANGE_EXTREME_PROXIMITY:
         return _leer_periodo(filtro, EnumParametro.LOOKBACK_VELAS_RANGE_EXTREME_PROXIMITY, 20)
+    if enum_filtro == EnumFiltro.RANGE_CONFLUENCE_D1_H4_H1:
+        return _leer_periodo(filtro, EnumParametro.LOOKBACK_VELAS_RANGE_CONFLUENCE_D1_H4_H1, 20)
     if enum_filtro in _FIXED_LOOKBACK:
         return _FIXED_LOOKBACK[enum_filtro]
     if enum_filtro in _DAY_ANCHORED:

@@ -16,6 +16,14 @@ class MarketData:
     snapshot: PriceSnapshot | None = None
     candles: list[CandleResponse] | None = None
     fundamental: FundamentalResponse | None = None
+    # Zona de precio (low, high) descubierta por un filtro anterior del mismo
+    # embudo (ej. el imbalance de un Order Block en H1) -- None si ningun
+    # filtro previo produjo una, o si este es el primer grupo evaluado.
+    zona: tuple[float, float] | None = None
+    # Velas de temporalidades adicionales (D1/H4/etc.) para filtros que
+    # necesitan confluencia entre varias a la vez, ademas de las `candles`
+    # de la temporalidad propia del grupo -- ver RangeConfluenceStrategy.
+    velas_extra: dict[str, list[CandleResponse]] | None = None
 
 
 class FilterStrategy(ABC):

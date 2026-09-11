@@ -17,7 +17,8 @@ def get_strategy(filtro: Filtro) -> FilterStrategy:
         RSIStrategy, ThroughEMAVWAPAlertStrategy)
     from app.strategies.liquidity_inducement import (
         AccelerationDecelerationStrategy, ConfirmationCandleStrategy,
-        LiquidityGrabCandleStrategy, OrderBlockImbalanceStrategy)
+        LiquidityGrabCandleStrategy, OrderBlockImbalanceStrategy,
+        RangeExtremeProximityStrategy)
     from app.strategies.patrones import (
         BearishBullishEngulfingStrategy, BreakOverRecentHighsLowsStrategy,
         ConsecutiveCandlesStrategy, FirstCandleStrategy, HighLowOfDayStrategy,
@@ -76,6 +77,7 @@ def get_strategy(filtro: Filtro) -> FilterStrategy:
         "LIQUIDITY_GRAB_CANDLE": LiquidityGrabCandleStrategy,
         "ACCELERATION_DECELERATION": AccelerationDecelerationStrategy,
         "CONFIRMATION_CANDLE": ConfirmationCandleStrategy,
+        "RANGE_EXTREME_PROXIMITY": RangeExtremeProximityStrategy,
         "FLOAT": FloatStrategy,
         "SHARES_OUTSTANDING": SharesOutstandingStrategy,
         "MARKET_CAP": MarketCapStrategy,

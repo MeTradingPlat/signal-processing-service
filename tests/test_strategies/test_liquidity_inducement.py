@@ -8,6 +8,7 @@ from app.strategies.base import MarketData
 from app.strategies.liquidity_inducement import (
     AccelerationDecelerationStrategy, ConfirmationCandleStrategy,
     LiquidityGrabCandleStrategy, OrderBlockImbalanceStrategy,
+    RangeExtremeProximityStrategy,
 )
 
 _TODAY = datetime.now(timezone.utc)
@@ -114,3 +115,42 @@ def test_confirmation_candle_without_imbalance_does_not_match():
     prev = _candle(high=100, low=95)
     curr = _candle(open_=99, close=103, high=103, low=99)
     assert ConfirmationCandleStrategy(filtro).compute_value(MarketData(symbol="AAPL", candles=[prev, curr])) == 0.0
+
+
+def test_range_extreme_proximity_bullish_near_low_matches():
+    filtro = _filtro(EnumFiltro.RANGE_EXTREME_PROXIMITY,
+                      **{EnumParametro.LOOKBACK_VELAS_RANGE_EXTREME_PROXIMITY: 3,
+                         EnumParametro.PROPORCION_PROXIMIDAD_RANGE_EXTREME_PROXIMITY: 0.15,
+                         EnumParametro.DIRECCION_RANGE_EXTREME_PROXIMITY: "ALCISTA"})
+    candles = [
+        _candle(high=110, low=105),
+        _candle(high=108, low=100),
+        _candle(open_=101, close=100.5, high=101, low=100),
+    ]
+    assert RangeExtremeProximityStrategy(filtro).compute_value(MarketData(symbol="AAPL", candles=candles)) == 1.0
+
+
+def test_range_extreme_proximity_bearish_near_high_matches():
+    filtro = _filtro(EnumFiltro.RANGE_EXTREME_PROXIMITY,
+                      **{EnumParametro.LOOKBACK_VELAS_RANGE_EXTREME_PROXIMITY: 3,
+                         EnumParametro.PROPORCION_PROXIMIDAD_RANGE_EXTREME_PROXIMITY: 0.15,
+                         EnumParametro.DIRECCION_RANGE_EXTREME_PROXIMITY: "BAJISTA"})
+    candles = [
+        _candle(high=100, low=90),
+        _candle(high=105, low=92),
+        _candle(open_=109, close=109.5, high=110, low=109),
+    ]
+    assert RangeExtremeProximityStrategy(filtro).compute_value(MarketData(symbol="AAPL", candles=candles)) == 1.0
+
+
+def test_range_extreme_proximity_middle_of_range_does_not_match():
+    filtro = _filtro(EnumFiltro.RANGE_EXTREME_PROXIMITY,
+                      **{EnumParametro.LOOKBACK_VELAS_RANGE_EXTREME_PROXIMITY: 3,
+                         EnumParametro.PROPORCION_PROXIMIDAD_RANGE_EXTREME_PROXIMITY: 0.15,
+                         EnumParametro.DIRECCION_RANGE_EXTREME_PROXIMITY: "ALCISTA"})
+    candles = [
+        _candle(high=110, low=105),
+        _candle(high=108, low=100),
+        _candle(open_=105, close=105, high=106, low=104),
+    ]
+    assert RangeExtremeProximityStrategy(filtro).compute_value(MarketData(symbol="AAPL", candles=candles)) == 0.0

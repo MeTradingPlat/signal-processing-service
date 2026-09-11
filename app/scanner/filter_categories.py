@@ -84,6 +84,7 @@ _REQUIERE_VELAS: set[EnumFiltro] = {
     EnumFiltro.LIQUIDITY_GRAB_CANDLE,
     EnumFiltro.ACCELERATION_DECELERATION,
     EnumFiltro.CONFIRMATION_CANDLE,
+    EnumFiltro.RANGE_EXTREME_PROXIMITY,
 }
 
 

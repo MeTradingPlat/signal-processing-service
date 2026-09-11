@@ -41,6 +41,23 @@ _TIMEFRAMES_CONFLUENCIA_EXTRA = ("H4", "H1")
 _BARS_CONFLUENCIA_EXTRA = 50
 
 
+def _todos_los_requeridos_pasan(filtros: List[Filtro], resultados: List[bool]) -> bool:
+    """AND estricto sobre los filtros SIN grupoAlternativo (comportamiento
+    de siempre); para los que comparten un mismo grupoAlternativo, basta
+    con que UNO de ellos haya pasado -- son variantes alternativas del
+    mismo paso, no requisitos simultaneos (ej. Liquidity Grab Candle o
+    Aceleracion-Desaceleracion, no las dos a la vez). `resultados[i]`
+    corresponde a `filtros[i]`, ya evaluado por el llamador."""
+    alternativos: dict[int, list[int]] = {}
+    for i, f in enumerate(filtros):
+        if f.grupoAlternativo is None:
+            if not resultados[i]:
+                return False
+        else:
+            alternativos.setdefault(f.grupoAlternativo, []).append(i)
+    return all(any(resultados[i] for i in indices) for indices in alternativos.values())
+
+
 def _make_marketdata(
     symbol: str,
     fund: Optional[FundamentalResponse] = None,
@@ -162,8 +179,9 @@ class SymbolPipeline:
             if fund is None:
                 rejected_no_data += 1
                 continue
-            if all(get_strategy(f).evaluate(_make_marketdata(sym, fund, None, None))
-                   for f in self.pre_estaticos):
+            resultados = [get_strategy(f).evaluate(_make_marketdata(sym, fund, None, None))
+                          for f in self.pre_estaticos]
+            if _todos_los_requeridos_pasan(self.pre_estaticos, resultados):
                 remaining.append(sym)
         self._filtrados = remaining
         logger.info("SymbolPipeline: static %d->%d (no_data=%d)", len(self._todos), len(self._filtrados), rejected_no_data)
@@ -202,7 +220,8 @@ class SymbolPipeline:
                 prevClose=fund.prevClose if fund else None,
             )
             data = _make_marketdata(sym, fund, None, snapshot)
-            if all(get_strategy(f).evaluate(data) for f in self.pre_dinamicos):
+            resultados = [get_strategy(f).evaluate(data) for f in self.pre_dinamicos]
+            if _todos_los_requeridos_pasan(self.pre_dinamicos, resultados):
                 remaining.append(sym)
         self._filtrados = remaining
         self._ultimo_filtrado = list(remaining)
@@ -383,8 +402,9 @@ class SymbolPipeline:
                         # leer la zona despues, evitando reconstruir y
                         # re-escanear el Order Block por segunda vez.
                         pares = [(f, get_strategy(f)) for f in filtros]
-                        sym_matches = [f for f, estrategia in pares if estrategia.evaluate(data)]
-                        if len(sym_matches) == len(filtros):
+                        resultados = [estrategia.evaluate(data) for _f, estrategia in pares]
+                        sym_matches = [f for (f, _e), r in zip(pares, resultados) if r]
+                        if _todos_los_requeridos_pasan(filtros, resultados):
                             vela_timestamp = candles[-1].timestamp
                             precio = candles[-1].close
                             matched[sym].extend(

@@ -18,3 +18,7 @@ class Filtro(BaseModel):
     objCategoria: Optional[CategoriaFiltro] = None
     parametros: List[Parametro] = Field(default_factory=list)
     revisionTiempoReal: bool = False
+    # None = filtro requerido (AND estricto, comportamiento de siempre). Dos
+    # o mas filtros con el MISMO valor forman un grupo alternativo dentro de
+    # su grupo de temporalidad -- ver symbols.py:_todos_los_requeridos_pasan.
+    grupoAlternativo: Optional[int] = None

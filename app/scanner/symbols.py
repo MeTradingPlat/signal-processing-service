@@ -389,7 +389,22 @@ class SymbolPipeline:
                         if not candles:
                             continue
                         candle_close_time = candles[-1].timestamp + timedelta(minutes=minutos)
-                        staleness_limit = timedelta(minutes=max(20, minutos * 2))
+                        if minutos >= 1440:
+                            # D1+: el mercado no genera velas sabado/domingo
+                            # (ni feriados), asi que "ahora - cierre de la
+                            # ultima vela" supera 2x la temporalidad todos los
+                            # lunes solo por el fin de semana -- confirmado en
+                            # vivo: rechazaba el 100% de los candidatos de
+                            # 'prueba daniel' (RANGE_EXTREME_PROXIMITY en D1)
+                            # cada lunes, sin ningun dato realmente atrasado.
+                            # Margen fijo que cubre un fin de semana largo mas
+                            # un feriado adicional, en vez de la formula
+                            # generica (pensada para temporalidades intradia
+                            # que si deben refrescar dentro del mismo dia
+                            # habil).
+                            staleness_limit = timedelta(days=4)
+                        else:
+                            staleness_limit = timedelta(minutes=max(20, minutos * 2))
                         if now_utc - candle_close_time > staleness_limit:
                             stale_symbols += 1
                             continue

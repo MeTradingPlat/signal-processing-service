@@ -33,6 +33,18 @@ def _relative_volume_m5_filtro() -> Filtro:
     )
 
 
+def _relative_volume_d1_filtro() -> Filtro:
+    return Filtro(
+        enumFiltro=EnumFiltro.RELATIVE_VOLUME,
+        parametros=[
+            Parametro(
+                enumParametro=EnumParametro.TIMEFRAME_RELATIVE_VOLUME_PERCENT,
+                objValorSeleccionado=ValorString(valor="1D"),
+            )
+        ],
+    )
+
+
 def test_signal_price_and_timestamp_come_from_last_closed_candle_not_forming_one():
     # Regression: marketdata-service agrega M5 en vivo sobre M1 sin cerrar
     # todavia -- una senal generada sobre esa vela en formacion registraba un
@@ -127,3 +139,56 @@ def test_stale_symbol_discarded_even_if_it_would_otherwise_match():
 
     assert "BSV" not in signals
     assert "AAPL" in signals
+
+
+def test_d1_last_closed_candle_from_friday_not_discarded_as_stale_on_monday():
+    # Regression: el mercado no genera velas D1 sabado/domingo, asi que el
+    # lunes la ULTIMA vela D1 cerrada real es la del viernes -- "ahora -
+    # cierre de esa vela" supera facil las 48h (2x temporalidad = limite
+    # generico para D1), y eso marcaba "stale" y descartaba el 100% de los
+    # candidatos TODOS los lunes, sin ningun dato realmente atrasado
+    # (confirmado en vivo con 'prueba daniel', filtro D1). Se simula con un
+    # cierre de vela ~60h atras (fin de semana tipico), que supera el
+    # limite viejo (48h) pero no el nuevo (4 dias).
+    now = datetime.now(timezone.utc)
+    friday_like = now - timedelta(days=3, hours=12)
+    thursday_like = friday_like - timedelta(days=1)
+
+    pipeline = SymbolPipeline(_escaner())
+    pipeline._filtrados = ["AAPL"]
+    filtro = _relative_volume_d1_filtro()
+
+    with patch.object(pipeline._client, "fetch_candles", return_value={
+        "AAPL": [
+            CandleResponse(
+                symbol="AAPL", timestamp=thursday_like,
+                open=10.0, high=10.0, low=10.0, close=10.0, volume=50,
+            ),
+            CandleResponse(
+                symbol="AAPL", timestamp=friday_like,
+                open=10.0, high=10.0, low=10.0, close=10.0, volume=100,
+            ),
+        ]
+    }):
+        signals = pipeline.evaluar_tecnicos({1440: [filtro]})
+
+    assert "AAPL" in signals
+
+
+def test_d1_candle_genuinely_ten_days_old_still_discarded_as_stale():
+    now = datetime.now(timezone.utc)
+    really_old = now - timedelta(days=10)
+
+    pipeline = SymbolPipeline(_escaner())
+    pipeline._filtrados = ["ZOMBIE"]
+    filtro = _relative_volume_d1_filtro()
+
+    with patch.object(pipeline._client, "fetch_candles", return_value={
+        "ZOMBIE": [CandleResponse(
+            symbol="ZOMBIE", timestamp=really_old,
+            open=10.0, high=10.0, low=10.0, close=10.0, volume=100,
+        )]
+    }):
+        signals = pipeline.evaluar_tecnicos({1440: [filtro]})
+
+    assert "ZOMBIE" not in signals

@@ -49,8 +49,16 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
     # vuelve a calificar tras haber dejado de hacerlo.
     signal_count = 0
     for symbol in nuevos:
+        # `symbol not in signals` (no `not passed_matches`) -- un escaner
+        # armado solo con pre-filtros (sin ningun filtro tecnico/de velas)
+        # llega aca con passed_matches=[] para CADA simbolo (evaluar_tecnicos
+        # con grupos={} no agrega ningun SignalMatch), y con `not
+        # passed_matches` esto se saltaba en silencio absolutamente todas las
+        # senales de ese tipo de escaner -- confirmado en vivo con
+        # 'TEST POST MARKET' y 'volumen test ', count=0 en kafka_producer
+        # ciclo tras ciclo pese a cientos de matches reales en runner.
         passed_matches = signals.get(symbol)
-        if not passed_matches:
+        if symbol not in signals:
             continue
         filtros_nombres = ", ".join([sm.filtro.enumFiltro.name for sm in passed_matches])
         # Sin matches tecnicos (escaner armado solo con pre-filtros, ver

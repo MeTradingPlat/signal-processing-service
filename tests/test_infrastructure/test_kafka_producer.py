@@ -59,6 +59,27 @@ def test_publish_signals_skips_symbol_not_in_nuevos(monkeypatch):
     assert fake.sent == []
 
 
+def test_publish_signals_publishes_pre_filter_only_matches(monkeypatch):
+    # Un escaner armado solo con filtros estaticos/dinamicos (sin ningun
+    # filtro tecnico) llega a evaluar_tecnicos con grupos={} y devuelve
+    # passed_matches=[] para cada simbolo -- eso NO significa "sin senal",
+    # significa "confirmado solo por pre-filtros". Regresion para el bug
+    # real visto en produccion con 'TEST POST MARKET'/'volumen test ':
+    # `if not passed_matches: continue` descartaba esto en silencio.
+    fake = _FakeProducer()
+    monkeypatch.setattr(kafka_producer, "_get_producer", lambda: fake)
+
+    signals = {"AAPL": []}
+    kafka_producer.publish_signals(scanner_id=2, scanner_name="TEST POST MARKET", signals=signals, nuevos={"AAPL"})
+
+    assert len(fake.sent) == 1
+    topic, key, value = fake.sent[0]
+    assert topic == "logs"
+    assert key == "AAPL"
+    assert value["mensaje"] == "Señal generada para AAPL en 'TEST POST MARKET'"
+    assert value["metadatos"] is not None
+
+
 def test_publish_signals_flush_timeout_does_not_raise(monkeypatch):
     fake = _FakeProducer(raise_on_flush=TimeoutError("broker unreachable"))
     monkeypatch.setattr(kafka_producer, "_get_producer", lambda: fake)

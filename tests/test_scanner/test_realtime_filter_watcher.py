@@ -40,7 +40,6 @@ def _escaner() -> Escaner:
 def _filtro_confirmation_candle() -> Filtro:
     return Filtro(
         enumFiltro=EnumFiltro.CONFIRMATION_CANDLE,
-        revisionTiempoReal=True,
         parametros=[
             Parametro(enumParametro=EnumParametro.TIMEFRAME_CONFIRMATION_CANDLE,
                       objValorSeleccionado=ValorString(valor="_1M")),
@@ -56,29 +55,43 @@ def _filtro_confirmation_candle() -> Filtro:
     )
 
 
+def _filtro_percentage_change() -> Filtro:
+    """PERCENTAGE_CHANGE con MAYOR_QUE 0 -- pasa si la ultima vela cerro por
+    encima de la primera del lote, simple y determinista para probar el
+    encadenamiento entre grupos (a diferencia de CONFIRMATION_CANDLE, que
+    necesita un patron de 3 velas puntual)."""
+    return Filtro(
+        enumFiltro=EnumFiltro.PERCENTAGE_CHANGE,
+        parametros=[
+            Parametro(enumParametro=EnumParametro.CONDICION,
+                      objValorSeleccionado=ValorCondicional(enumCondicional=EnumCondicional.MAYOR_QUE, valor1=0.0)),
+        ],
+    )
+
+
 def _make_watcher():
     published = []
     watcher = RealtimeFilterWatcher(
         _escaner(), "ws://marketdata-service:8082/ws/candles",
-        publish_signal=lambda escaner, symbol, match: published.append((symbol, match)),
+        publish_signal=lambda escaner, symbol, matches: published.append((symbol, matches)),
         client_factory=_FakeCandleClient,
     )
     return watcher, published
 
 
-def test_actualizar_suscribe_a_los_candidatos_del_grupo_del_filtro():
+def test_actualizar_universo_suscribe_al_primer_grupo():
     watcher, _ = _make_watcher()
-    filtro = _filtro_confirmation_candle()
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
 
-    watcher.actualizar([filtro], candidatos_previos_a_grupo={1: {"AAPL", "MSFT"}, 240: {"AAPL"}})
+    watcher.actualizar_universo({"AAPL", "MSFT"})
 
     assert watcher._client.subscriptions == {("AAPL", "M1"), ("MSFT", "M1")}
 
 
 def test_bar_cerrada_que_confirma_publica_senal():
     watcher, published = _make_watcher()
-    filtro = _filtro_confirmation_candle()
-    watcher.actualizar([filtro], candidatos_previos_a_grupo={1: {"AAPL"}})
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
+    watcher.actualizar_universo({"AAPL"})
 
     # 3 velas: imbalance de 3 velas (igual que Order Block) entre la 1 y la
     # 3, mas vela de poder en la 3 (cuerpo/rango >= 0.5, sin solape con la 1).
@@ -91,16 +104,17 @@ def test_bar_cerrada_que_confirma_publica_senal():
     })
 
     assert len(published) == 1
-    symbol, match = published[0]
+    symbol, matches = published[0]
     assert symbol == "AAPL"
-    assert match.filtro.enumFiltro == EnumFiltro.CONFIRMATION_CANDLE
-    assert match.precio == 15
+    assert len(matches) == 1
+    assert matches[0].filtro.enumFiltro == EnumFiltro.CONFIRMATION_CANDLE
+    assert matches[0].precio == 15
 
 
 def test_bar_cerrada_que_no_confirma_no_publica():
     watcher, published = _make_watcher()
-    filtro = _filtro_confirmation_candle()
-    watcher.actualizar([filtro], candidatos_previos_a_grupo={1: {"AAPL"}})
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
+    watcher.actualizar_universo({"AAPL"})
 
     watcher._client.on_history("AAPL", "M1", [
         {"time": 1_700_000_000, "open": 10, "high": 10, "low": 9, "close": 9.5, "closed": True},
@@ -114,7 +128,114 @@ def test_bar_cerrada_que_no_confirma_no_publica():
     assert published == []
 
 
+def test_tick_parcial_se_ignora_no_evalua_ni_publica():
+    """/ws/candles manda un mensaje por cada tick de la vela en formacion
+    (closed=false) antes del cierre real -- no debe evaluarse el filtro ni
+    contaminar el buffer de velas hasta que llegue closed=true."""
+    watcher, published = _make_watcher()
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
+    watcher.actualizar_universo({"AAPL"})
+    watcher._client.on_history("AAPL", "M1", [
+        {"time": 1_700_000_000, "open": 10, "high": 10, "low": 9, "close": 9.5, "closed": True},
+        {"time": 1_700_000_060, "open": 9.5, "high": 10.5, "low": 9.5, "close": 10, "closed": True},
+    ])
+
+    # Tick parcial de la vela que todavia se esta formando -- se ignora.
+    watcher._client.on_bar("AAPL", "M1", {
+        "time": 1_700_000_120, "open": 11, "high": 15, "low": 11, "close": 15, "closed": False,
+    })
+    assert published == []
+    assert len(watcher._candles[("AAPL", "M1")]) == 2
+
+    # Recien al cerrar de verdad se evalua y publica.
+    watcher._client.on_bar("AAPL", "M1", {
+        "time": 1_700_000_120, "open": 11, "high": 15, "low": 11, "close": 15, "closed": True,
+    })
+    assert len(published) == 1
+    assert len(watcher._candles[("AAPL", "M1")]) == 3
+
+
 def test_stop_delega_al_cliente():
     watcher, _ = _make_watcher()
     watcher.stop()
     assert watcher._client.stopped is True
+
+
+def _pasar_d1(watcher, symbol="AAPL", suba=True):
+    """Cierra una vela D1 que pasa (suba=True) o falla (suba=False) el
+    filtro PERCENTAGE_CHANGE > 0 configurado en el grupo D1 de los tests de
+    encadenamiento."""
+    open_ = 100
+    close = 110 if suba else 90
+    watcher._client.on_history(symbol, "D1", [
+        {"time": 1_700_000_000, "open": open_, "high": open_, "low": open_, "close": open_, "closed": True},
+    ])
+    watcher._client.on_bar(symbol, "D1", {
+        "time": 1_700_086_400, "open": open_, "high": max(open_, close), "low": min(open_, close),
+        "close": close, "closed": True,
+    })
+
+
+def test_cadena_multigrupo_promueve_y_publica_al_completar():
+    """D1 (grueso) -> M1 (fino): solo se suscribe a M1 despues de pasar D1,
+    y la señal publicada trae los matches de AMBOS grupos -- igual que
+    evaluar_tecnicos ensamblaria en una sola pasada batch."""
+    watcher, published = _make_watcher()
+    watcher.configurar_grupos({1440: [_filtro_percentage_change()], 1: [_filtro_percentage_change()]})
+    watcher.actualizar_universo({"AAPL"})
+
+    assert watcher._client.subscriptions == {("AAPL", "D1")}
+
+    _pasar_d1(watcher, suba=True)
+    assert published == []
+    assert watcher._client.subscriptions == {("AAPL", "D1"), ("AAPL", "M1")}
+
+    watcher._client.on_history("AAPL", "M1", [
+        {"time": 1_700_100_000, "open": 50, "high": 50, "low": 50, "close": 50, "closed": True},
+    ])
+    watcher._client.on_bar("AAPL", "M1", {
+        "time": 1_700_100_060, "open": 50, "high": 65, "low": 50, "close": 65, "closed": True,
+    })
+
+    assert len(published) == 1
+    symbol, matches = published[0]
+    assert symbol == "AAPL"
+    assert len(matches) == 2
+
+
+def test_simbolo_ya_calificando_no_republica_al_repetir_vela_fina():
+    watcher, published = _make_watcher()
+    watcher.configurar_grupos({1440: [_filtro_percentage_change()], 1: [_filtro_percentage_change()]})
+    watcher.actualizar_universo({"AAPL"})
+    _pasar_d1(watcher, suba=True)
+    watcher._client.on_history("AAPL", "M1", [
+        {"time": 1_700_100_000, "open": 50, "high": 50, "low": 50, "close": 50, "closed": True},
+    ])
+    watcher._client.on_bar("AAPL", "M1", {
+        "time": 1_700_100_060, "open": 50, "high": 65, "low": 50, "close": 65, "closed": True,
+    })
+    assert len(published) == 1
+
+    # Otra vela M1 que sigue calificando -- no debe volver a publicar.
+    watcher._client.on_bar("AAPL", "M1", {
+        "time": 1_700_100_120, "open": 65, "high": 70, "low": 65, "close": 70, "closed": True,
+    })
+
+    assert len(published) == 1
+
+
+def test_grupo_grueso_que_deja_de_calificar_degrada_y_desuscribe():
+    watcher, published = _make_watcher()
+    watcher.configurar_grupos({1440: [_filtro_percentage_change()], 1: [_filtro_percentage_change()]})
+    watcher.actualizar_universo({"AAPL"})
+    _pasar_d1(watcher, suba=True)
+    assert watcher._client.subscriptions == {("AAPL", "D1"), ("AAPL", "M1")}
+
+    # Al dia siguiente cierra una nueva D1 que ya NO pasa -- degrada al
+    # simbolo y lo desuscribe de M1, sin esperar a que M1 haga nada.
+    watcher._client.on_bar("AAPL", "D1", {
+        "time": 1_700_172_800, "open": 110, "high": 110, "low": 90, "close": 90, "closed": True,
+    })
+
+    assert watcher._client.subscriptions == {("AAPL", "D1")}
+    assert published == []

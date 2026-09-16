@@ -8,6 +8,14 @@ from app.scanner.timeframe import extraer_timeframe_minutos, minutos_to_label
 logger = logging.getLogger(__name__)
 
 _FLUSH_TIMEOUT_SECONDS = 10
+# kafka-python bloquea send() hasta este limite esperando metadata del topico
+# antes de tirar KafkaTimeoutError -- el default (60000ms) confirmado en vivo
+# 2026-09-16: un producer que no podia refrescar metadata dejaba CADA send()
+# de un ciclo colgado 60s, y con ~30 simbolos nuevos eso trababa el escaner
+# entero (single-threaded, un ciclo por vez) hasta 30 minutos sin ningun
+# error visible salvo un log suelto por simbolo. Bajarlo hace que un Kafka
+# no disponible falle rapido en vez de arrastrar el ciclo completo.
+_MAX_BLOCK_MS = 5000
 
 _producer = None
 
@@ -24,6 +32,7 @@ def _get_producer():
             key_serializer=lambda k: k.encode("utf-8") if k else None,
             acks=1,
             retries=3,
+            max_block_ms=_MAX_BLOCK_MS,
         )
         logger.info("Kafka producer connected to %s", settings.kafka_bootstrap_servers)
     except Exception as e:
@@ -99,7 +108,14 @@ def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: s
             signal_count += 1
             logger.debug("SIGNAL: scanner='%s' symbol=%s filters=%s", scanner_name, symbol, filtros_nombres)
         except Exception as e:
+            # Cortar el resto del ciclo en vez de seguir intentando el
+            # proximo simbolo -- confirmado en vivo 2026-09-16: si Kafka no
+            # puede refrescar metadata, CADA send() de este loop repite el
+            # mismo bloqueo de _MAX_BLOCK_MS antes de fallar, y con ~30
+            # simbolos nuevos eso multiplicaba el bloqueo del escaner entero
+            # (un ciclo a la vez) en vez de fallar rapido una sola vez.
             logger.error("Failed to publish signal for %s: %s", symbol, e)
+            break
 
     if producer and producer is not False:
         # timeout explicito -- flush(timeout=None) espera indefinido a que

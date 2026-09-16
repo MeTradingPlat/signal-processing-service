@@ -7,11 +7,14 @@ from app.models.signal_match import SignalMatch
 
 
 class _FakeProducer:
-    def __init__(self, raise_on_flush=None):
+    def __init__(self, raise_on_flush=None, raise_on_send=None):
         self.sent = []
         self._raise_on_flush = raise_on_flush
+        self._raise_on_send = raise_on_send
 
     def send(self, topic, key=None, value=None):
+        if self._raise_on_send:
+            raise self._raise_on_send
         self.sent.append((topic, key, value))
 
     def flush(self, timeout=None):
@@ -78,6 +81,23 @@ def test_publish_signals_publishes_pre_filter_only_matches(monkeypatch):
     assert key == "AAPL"
     assert value["mensaje"] == "Señal generada para AAPL en 'TEST POST MARKET'"
     assert value["metadatos"] is not None
+
+
+def test_publish_signals_stops_after_first_send_failure(monkeypatch):
+    # Confirmado en vivo 2026-09-16: si Kafka no puede refrescar metadata,
+    # cada send() de un ciclo repite el mismo bloqueo (_MAX_BLOCK_MS) antes
+    # de fallar -- con ~30 simbolos nuevos eso trababa el escaner entero
+    # (un ciclo a la vez, single-threaded) durante decenas de minutos.
+    # Cortar en el primer fallo evita que un Kafka caido multiplique el
+    # bloqueo por cada simbolo restante.
+    fake = _FakeProducer(raise_on_send=TimeoutError("Failed to update metadata after 60.0 secs."))
+    monkeypatch.setattr(kafka_producer, "_get_producer", lambda: fake)
+
+    signals = {"AAPL": [_signal_match()], "MSFT": [_signal_match()], "TSLA": [_signal_match()]}
+    kafka_producer.publish_signals(scanner_id=1, scanner_name="test", signals=signals,
+                                    nuevos={"AAPL", "MSFT", "TSLA"})
+
+    assert fake.sent == []
 
 
 def test_publish_signals_flush_timeout_does_not_raise(monkeypatch):

@@ -12,6 +12,16 @@ _PING_INTERVAL_SECONDS = 25
 _PING_TIMEOUT_SECONDS = 10
 
 
+def _group_by_timeframe(keys: set[tuple[str, str]]) -> dict[str, list[str]]:
+    """Funcion libre (no metodo) a proposito -- se puede probar sin
+    instanciar RealtimeCandleClient, que arranca un hilo real conectando a
+    un WS apenas se construye."""
+    by_timeframe: dict[str, list[str]] = {}
+    for symbol, timeframe in keys:
+        by_timeframe.setdefault(timeframe, []).append(symbol)
+    return by_timeframe
+
+
 class RealtimeCandleClient:
     """Cliente WS hacia /ws/candles de marketdata-service -- el mismo
     endpoint que ya usa el frontend (candle-stream.service.ts) para
@@ -50,10 +60,19 @@ class RealtimeCandleClient:
             to_add = self._desired - self._subscribed
             to_remove = self._subscribed - self._desired
             self._subscribed = set(self._desired)
-        for symbol, timeframe in to_add:
-            self._send({"action": "subscribe", "symbol": symbol, "timeframe": timeframe})
-        for symbol, timeframe in to_remove:
-            self._send({"action": "unsubscribe", "symbol": symbol, "timeframe": timeframe})
+        self._send_batched("subscribe", to_add)
+        self._send_batched("unsubscribe", to_remove)
+
+    def _send_batched(self, action: str, keys: set[tuple[str, str]]) -> None:
+        """Un mensaje por timeframe con TODOS los simbolos de ese timeframe,
+        no uno por (simbolo, timeframe) -- con miles de simbolos elegibles
+        de golpe (ej. al arrancar el dia), un mensaje por simbolo dejaba a
+        marketdata-service pidiendo el historial uno a uno, en fila, sobre
+        el mismo socket (confirmado que eso tardaba un buen rato en ponerse
+        al dia). El servidor ya soporta `symbols` en vez de `symbol` para
+        esto (ver candleSubscribeRequest en candle_ws_session.go)."""
+        for timeframe, symbols in _group_by_timeframe(keys).items():
+            self._send({"action": action, "symbols": symbols, "timeframe": timeframe})
 
     def _send(self, frame: dict) -> None:
         try:

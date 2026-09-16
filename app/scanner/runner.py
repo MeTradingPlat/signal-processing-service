@@ -19,19 +19,26 @@ _CYCLE_SECONDS = 60.0
 _BAR_CLOSE_BUFFER_SECONDS = 1.0
 
 
-def _build_realtime_watcher(escaner: Escaner):
-    """None si el escaner no tiene ningun filtro con revisionTiempoReal=true
-    -- evita abrir una conexion WS de mas para el caso comun (todos los
-    escaneres que no usan esta funcionalidad)."""
-    if not any(f.revisionTiempoReal for f in escaner.filtros):
+def _build_realtime_watcher(escaner: Escaner, pipeline: SymbolPipeline):
+    """None si el escaner no tiene ningun filtro tecnico -- esos siguen el
+    camino batch de siempre (_do_cycle evalua pipeline.evaluar_tecnicos
+    directo). Con al menos uno, TODOS los filtros tecnicos pasan por este
+    watcher via WebSocket -- ya no depende de revisionTiempoReal (retirado:
+    con costo marginal cero de sesiones DxLink -- ver
+    livecandles.Broadcaster en marketdata-service, es un fan-out interno de
+    datos que ya fluyen -- no hay razon para limitar el tiempo real a un
+    subconjunto de filtros)."""
+    if not pipeline.tecnicos:
         return None
     from app.scanner.realtime_filter_watcher import RealtimeFilterWatcher
     ws_url = settings.marketdata_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/candles"
-    return RealtimeFilterWatcher(escaner, ws_url, _publish_realtime_signal)
+    watcher = RealtimeFilterWatcher(escaner, ws_url, _publish_realtime_signal)
+    watcher.configurar_grupos(agrupar_por_timeframe(pipeline.tecnicos))
+    return watcher
 
 
-def _publish_realtime_signal(escaner: Escaner, symbol: str, match: SignalMatch) -> None:
-    _publish_signals(escaner, {symbol: [match]}, {symbol})
+def _publish_realtime_signal(escaner: Escaner, symbol: str, matches: list[SignalMatch]) -> None:
+    _publish_signals(escaner, {symbol: matches}, {symbol})
 
 
 def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
@@ -70,7 +77,7 @@ def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
 def run_scanner(escaner: Escaner):
     orchestrator_pid = os.getppid()
     pipeline = SymbolPipeline(escaner)
-    watcher = _build_realtime_watcher(escaner)
+    watcher = _build_realtime_watcher(escaner, pipeline)
 
     logger.info(
         "ScannerRunner: started id=%d name='%s' pid=%d type=%s window=%s-%s pre=%d tec=%d",
@@ -126,19 +133,22 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, watcher=None):
     logger.debug("ScannerRunner: cycle id=%d symbols=%d", escaner.idEscaner, len(pipeline.filtrados))
     pipeline.aplicar_pre_filtros()
 
-    # Antes esto vivia detras de "if pipeline.tecnicos:" -- un escaner armado
-    # solo con pre-filtros (precio/volumen/fundamentales, sin ningun filtro
-    # que necesite velas) nunca llegaba a evaluar_tecnicos ni a publicar,
-    # sin importar cuantos simbolos pasaran los pre-filtros. evaluar_tecnicos
-    # ya maneja bien grupos={} (devuelve los candidatos tal cual, sin
-    # matches tecnicos) -- el problema era que el caller ni lo intentaba.
+    if watcher is not None:
+        # Filtros tecnicos: los evalua el watcher por eventos (WebSocket),
+        # no este ciclo -- ver RealtimeFilterWatcher. Este ciclo solo
+        # mantiene actualizado el universo elegible segun los pre-filtros
+        # (precio/volumen/fundamentales, que por ahora siguen via REST, ver
+        # Fase 2 del plan); no evalua ni publica nada tecnico de por si.
+        watcher.actualizar_universo(set(pipeline.filtrados))
+        return
+
+    # Sin ningun filtro tecnico (escaner armado solo con pre-filtros): sin
+    # cambios respecto al camino de siempre. evaluar_tecnicos ya maneja bien
+    # grupos={} (devuelve los candidatos tal cual, sin matches tecnicos).
     grupos = agrupar_por_timeframe(pipeline.tecnicos)
     signals = pipeline.evaluar_tecnicos(grupos)
     nuevos = pipeline.nuevos_symbols(signals)
     _publish_signals(escaner, signals, nuevos)
-    if watcher is not None:
-        filtros_realtime = [f for f in pipeline.tecnicos if f.revisionTiempoReal]
-        watcher.actualizar(filtros_realtime, pipeline.candidatos_previos_a_grupo, pipeline.zonas)
     if signals:
         logger.info("ScannerRunner: id=%d signals=%d symbols=%s",
                     escaner.idEscaner, len(signals), list(signals.keys())[:5])
@@ -179,6 +189,8 @@ def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int
                     # dejar el ultimo resultado de la sesion mostrandose como
                     # "ACTIVO" toda la noche hasta el primer ciclo de manana.
                     _publish_signals(escaner, {}, set())
+                    if watcher is not None:
+                        watcher.actualizar_universo(set())
                 last_date = None
                 next_run = next_trading_window(start, now)
                 wait = (next_run - now).total_seconds()

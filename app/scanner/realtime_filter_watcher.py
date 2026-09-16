@@ -7,7 +7,7 @@ from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
 from app.scanner.marketdata_models import CandleResponse
 from app.scanner.realtime_candle_client import RealtimeCandleClient
-from app.scanner.timeframe import extraer_timeframe_minutos, minutos_to_label
+from app.scanner.timeframe import minutos_to_label
 from app.strategies.base import MarketData
 from app.strategies.registry import get_strategy
 
@@ -25,56 +25,200 @@ def _to_candle(symbol: str, bar: dict) -> CandleResponse:
     )
 
 
-class RealtimeFilterWatcher:
-    """Reevalua, apenas cierra una vela en /ws/candles de marketdata-service,
-    los filtros de un escaner marcados con revisionTiempoReal=true -- sin
-    esperar el ciclo normal de ~60s (ver runner.py). Se actualiza en cada
-    ciclo con `SymbolPipeline.candidatos_previos_a_grupo`: los simbolos que
-    ya sobrevivieron todo el resto del embudo y solo les falta este filtro."""
+def _todos_los_requeridos_pasan(filtros: list[Filtro], resultados: list[bool]) -> bool:
+    """Copia de app.scanner.symbols._todos_los_requeridos_pasan -- mismo
+    criterio de grupoAlternativo, pero este modulo no puede importar symbols
+    (dependencia circular: symbols ya no conoce este archivo, y no hace
+    falta que lo haga)."""
+    alternativos: dict[int, list[int]] = {}
+    for i, f in enumerate(filtros):
+        if f.grupoAlternativo is None:
+            if not resultados[i]:
+                return False
+        else:
+            alternativos.setdefault(f.grupoAlternativo, []).append(i)
+    return all(any(resultados[i] for i in indices) for indices in alternativos.values())
 
-    def __init__(self, escaner: Escaner, ws_url: str, publish_signal: Callable[[Escaner, str, SignalMatch], None],
+
+class RealtimeFilterWatcher:
+    """Motor unico de evaluacion de filtros tecnicos -- reemplaza el ciclo
+    batch (que pedia velas por REST cada ~60-90s) para CUALQUIER escaner con
+    al menos un filtro tecnico, ya no solo los marcados revisionTiempoReal
+    (retirado, ver frontend/scanner-management-service). Encadena grupos de
+    mayor a menor temporalidad (D1 -> H1 -> M1) igual que
+    SymbolPipeline.evaluar_tecnicos, pero por eventos: cada simbolo avanza de
+    grupo en grupo a medida que van cerrando sus propias velas, en vez de
+    recalcularse todo junto en una pasada sincronica.
+
+    Estado por simbolo (todo se resetea via actualizar_universo cuando los
+    pre-filtros lo excluyen):
+    - `_stage[symbol]`: indice (en `_grupos`, ordenado grueso->fino) del
+      PROXIMO grupo que este simbolo necesita pasar. Un simbolo sigue
+      suscripto a su propio timeframe Y a los de todos los grupos mas
+      gruesos que ya paso (ver _resuscribir) -- asi una vela mas gruesa que
+      vuelve a cerrar (ej. D1 al dia siguiente) puede re-validarlo o
+      degradarlo, igual que el batch recalculaba candidatos_previos_a_grupo
+      desde cero en cada ciclo.
+    - `_group_matches[symbol][i]`: matches que produjo el grupo `i` la
+      ULTIMA vez que el simbolo lo paso -- se descartan los indices >= al
+      grupo que acaba de fallar (ver _on_bar) para no arrastrar matches
+      viejos de un grupo mas fino que ya no es valido.
+    - `_zonas[symbol]`: misma idea que SymbolPipeline.zonas, pero mantenida
+      por este watcher en vez de por una pasada batch.
+    - `_signaling`: simbolos que YA completaron la cadena entera y siguen
+      calificando sin interrupcion -- evita republicar en cada vela fina que
+      sigue pasando (mismo espiritu que nuevos_symbols/_previously_matched
+      del camino batch, pero por simbolo en vez de por set completo).
+    """
+
+    def __init__(self, escaner: Escaner, ws_url: str,
+                 publish_signal: Callable[[Escaner, str, list[SignalMatch]], None],
                  client_factory=RealtimeCandleClient):
         self._escaner = escaner
         self._publish_signal = publish_signal
-        self._filtros_por_timeframe: dict[str, list[Filtro]] = {}
+        self._grupos: list[tuple[int, str, list[Filtro]]] = []
         self._candles: dict[tuple[str, str], list[CandleResponse]] = {}
         self._zonas: dict[str, tuple[float, float]] = {}
+        self._group_matches: dict[str, dict[int, list[SignalMatch]]] = {}
+        self._stage: dict[str, int] = {}
+        self._signaling: set[str] = set()
         self._client = client_factory(ws_url, self._on_history, self._on_bar)
 
-    def actualizar(self, filtros_realtime: list[Filtro], candidatos_previos_a_grupo: dict[int, set],
-                   zonas: dict[str, tuple[float, float]] | None = None) -> None:
-        self._filtros_por_timeframe = {}
-        # Foto de las zonas del ultimo ciclo batch (SymbolPipeline.zonas) --
-        # sin esto, un filtro zona-aware con revisionTiempoReal=true (ej.
-        # CONFIRMATION_CANDLE) evaluaria siempre sin restriccion de zona por
-        # este camino, aunque el resto del embudo si la tenga.
-        self._zonas = dict(zonas) if zonas else {}
-        keys: set[tuple[str, str]] = set()
-        for filtro in filtros_realtime:
-            minutos = extraer_timeframe_minutos(filtro)
-            tf_label = minutos_to_label(minutos)
-            self._filtros_por_timeframe.setdefault(tf_label, []).append(filtro)
-            for symbol in candidatos_previos_a_grupo.get(minutos, set()):
-                keys.add((symbol, tf_label))
-        self._client.update_subscriptions(keys)
+    def configurar_grupos(self, grupos: dict[int, list[Filtro]]) -> None:
+        """Se llama una sola vez al arrancar el escaner -- los filtros
+        tecnicos de un escaner no cambian en caliente (editar filtros exige
+        parar/reiniciar el escaner, ver scanner-management-service)."""
+        self._grupos = [
+            (minutos, minutos_to_label(minutos), filtros)
+            for minutos, filtros in sorted(grupos.items(), key=lambda kv: -kv[0])
+        ]
+
+    def actualizar_universo(self, filtrados: set[str]) -> None:
+        """Se llama tras cada refresco de pre-filtros (aplicar_pre_filtros):
+        agrega simbolos nuevos al primer grupo (el mas grueso), y resetea
+        por completo cualquier simbolo que los pre-filtros ya no admiten --
+        no tiene sentido seguir gastando una suscripcion en un simbolo que
+        ni siquiera paso el precio/volumen/fundamentales."""
+        actuales = set(self._stage)
+        for symbol in actuales - filtrados:
+            self._resetear_symbol(symbol)
+        for symbol in filtrados - actuales:
+            self._stage[symbol] = 0
+        self._resuscribir()
 
     def stop(self) -> None:
         self._client.stop()
 
+    def _resetear_symbol(self, symbol: str) -> None:
+        self._stage.pop(symbol, None)
+        self._group_matches.pop(symbol, None)
+        self._zonas.pop(symbol, None)
+        self._signaling.discard(symbol)
+
+    def _resuscribir(self) -> None:
+        keys: set[tuple[str, str]] = set()
+        for symbol, stage in self._stage.items():
+            # Suscripto a su propio grupo (stage) Y a todos los mas gruesos
+            # que ya paso (0..stage-1) -- estos ultimos siguen vigilados
+            # para poder degradar al simbolo si una vela gruesa que vuelve a
+            # cerrar deja de calificar.
+            for i in range(min(stage, len(self._grupos) - 1) + 1):
+                keys.add((symbol, self._grupos[i][1]))
+        self._client.update_subscriptions(keys)
+
     def _on_history(self, symbol: str, timeframe: str, bars: list[dict]) -> None:
         self._candles[(symbol, timeframe)] = [_to_candle(symbol, b) for b in bars if b.get("closed")]
 
+    def _indice_grupo(self, tf_label: str) -> int | None:
+        for i, (_, label, _) in enumerate(self._grupos):
+            if label == tf_label:
+                return i
+        return None
+
     def _on_bar(self, symbol: str, timeframe: str, bar: dict) -> None:
+        # /ws/candles manda un mensaje por CADA tick de la vela en formacion
+        # (closed=false) y recien uno solo, al cerrar el periodo real,
+        # closed=true (ver forwardLive en candle_ws_session.go). Sin este
+        # filtro se evaluaba (y se podia promover/degradar/publicar) en cada
+        # tick parcial en vez de una sola vez por vela realmente cerrada --
+        # mismo criterio que _on_history ya aplicaba al sembrar el historial
+        # inicial (filtra por "closed" ahi tambien).
+        if not bar.get("closed"):
+            return
+
         key = (symbol, timeframe)
         candles = self._candles.setdefault(key, [])
         candles.append(_to_candle(symbol, bar))
         del candles[:-_MAX_BUFFERED_BARS]
 
+        j = self._indice_grupo(timeframe)
+        if j is None:
+            return
+        stage = self._stage.get(symbol)
+        # stage=None: los pre-filtros ya no admiten este simbolo (o nunca lo
+        # admitieron) -- pudo quedar un evento en vuelo justo cuando se
+        # desuscribio, se descarta. j > stage: todavia no le toca (no paso
+        # los grupos mas gruesos), _resuscribir no deberia haberlo
+        # suscripto a esto, pero se descarta por las dudas.
+        if stage is None or j > stage:
+            return
+
+        _, _, filtros = self._grupos[j]
         data = MarketData(symbol=symbol, candles=candles, zona=self._zonas.get(symbol))
-        for filtro in self._filtros_por_timeframe.get(timeframe, []):
-            if not get_strategy(filtro).evaluate(data):
-                continue
-            logger.info("RealtimeFilterWatcher: match en vivo symbol=%s filtro=%s escaner=%d",
-                        symbol, filtro.enumFiltro.name, self._escaner.idEscaner)
-            match = SignalMatch(filtro=filtro, vela_timestamp=candles[-1].timestamp, precio=candles[-1].close)
-            self._publish_signal(self._escaner, symbol, match)
+        pares = [(f, get_strategy(f)) for f in filtros]
+        resultados = [estrategia.evaluate(data) for _f, estrategia in pares]
+        paso = _todos_los_requeridos_pasan(filtros, resultados)
+
+        if not paso:
+            self._degradar(symbol, j)
+            return
+
+        matches = [
+            SignalMatch(filtro=f, vela_timestamp=candles[-1].timestamp, precio=candles[-1].close)
+            for (f, _e), r in zip(pares, resultados) if r
+        ]
+        self._group_matches.setdefault(symbol, {})[j] = matches
+        for _f, estrategia in pares:
+            zona = getattr(estrategia, "ultima_zona", None)
+            if zona is not None:
+                self._zonas[symbol] = zona
+
+        if j == len(self._grupos) - 1:
+            self._completar_cadena(symbol)
+            return
+        if j == stage:
+            self._stage[symbol] = j + 1
+            self._resuscribir()
+
+    def _degradar(self, symbol: str, grupo_index: int) -> None:
+        """El simbolo dejo de calificar en el grupo `grupo_index` -- vuelve
+        a quedar a la espera de que ESE grupo cierre otra vela y lo
+        re-evalue (no se lo saca del universo, eso solo lo decide
+        actualizar_universo segun los pre-filtros). Se descartan los
+        matches/zona de este grupo en adelante: son de una cadena que ya no
+        es valida."""
+        self._stage[symbol] = grupo_index
+        matches_por_grupo = self._group_matches.get(symbol)
+        if matches_por_grupo:
+            for i in [i for i in matches_por_grupo if i >= grupo_index]:
+                del matches_por_grupo[i]
+        self._zonas.pop(symbol, None)
+        self._signaling.discard(symbol)
+        self._resuscribir()
+
+    def _completar_cadena(self, symbol: str) -> None:
+        """El simbolo paso TODOS los grupos, del mas grueso al mas fino --
+        misma señal completa que evaluar_tecnicos arma en una sola pasada,
+        aca ensamblada a partir de lo que cada grupo fue confirmando por su
+        cuenta. Solo se publica en la transicion de "no calificaba" a
+        "califica" -- si ya estaba calificando sin interrupcion, no se
+        repite la señal cada vez que la vela mas fina vuelve a cerrar
+        (mismo espiritu que nuevos_symbols del camino batch)."""
+        if symbol in self._signaling:
+            return
+        self._signaling.add(symbol)
+        matches_por_grupo = self._group_matches.get(symbol, {})
+        matches = [m for i in sorted(matches_por_grupo) for m in matches_por_grupo[i]]
+        logger.info("RealtimeFilterWatcher: cadena completa symbol=%s escaner=%d filtros=%s",
+                    symbol, self._escaner.idEscaner, [m.filtro.enumFiltro.name for m in matches])
+        self._publish_signal(self._escaner, symbol, matches)

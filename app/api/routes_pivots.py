@@ -17,9 +17,12 @@ _TRADING_DAYS_PER_YEAR = 252
 PriceReference = Literal["live", "open", "prev_close", "signal"]
 
 
+def _bars_for_years(years: int) -> int:
+    return years * _TRADING_DAYS_PER_YEAR + 30
+
+
 def _fetch_clean_candles(symbol: str, years: int):
-    bars = years * _TRADING_DAYS_PER_YEAR + 30
-    candles_crudas = _client.fetch_candles([symbol], _TIMEFRAME, bars).get(symbol, [])
+    candles_crudas = _client.fetch_candles([symbol], _TIMEFRAME, _bars_for_years(years)).get(symbol, [])
     # La vela D1 del dia en curso suele venir con high/low/close en None hasta
     # que cierra -- sin filtrarla, calculate_atr revienta con un 500 al restar
     # None (confirmado en vivo: fallaba para CUALQUIER simbolo, no solo uno
@@ -68,6 +71,14 @@ def get_pivots(
     siguientes (igual que el original: no se recalcula al crecer el
     historial). Los pivotes debiles solo se buscan en el ultimo intento (el
     de historial mas profundo), como relleno final si aun faltan fuertes.
+
+    El historial se pide UNA SOLA VEZ (el maximo de anios_historico) y cada
+    "año" de la expansion recorta ese mismo resultado por la cola (viene
+    ordenado ascendente, mas reciente al final) en vez de volver a pedirlo
+    -- antes cada año disparaba su PROPIA llamada a
+    /marketdata/historical/batch, sin reusar nada de la anterior. Confirmado
+    en vivo el 2026-09-18: 51s totales para AAPL, con la ultima llamada (el
+    rango mas grande) sola tardando 37.6s del lado de marketdata-service.
     """
     current_price = _resolve_current_price(symbol, price_reference, explicit_price)
     if current_price is None:
@@ -79,6 +90,8 @@ def get_pivots(
             detail = "No hay suficiente historial D1 para este símbolo"
         raise HTTPException(status_code=404, detail=detail)
 
+    candles_max = _fetch_clean_candles(symbol, anios_historico)
+
     atr = None
     resistencias_fuertes: list = []
     soportes_fuertes: list = []
@@ -86,7 +99,7 @@ def get_pivots(
     valleys: list = []
 
     for year in range(1, anios_historico + 1):
-        candles = _fetch_clean_candles(symbol, year)
+        candles = candles_max[-_bars_for_years(year):]
         if len(candles) < atr_length + 1:
             continue
 

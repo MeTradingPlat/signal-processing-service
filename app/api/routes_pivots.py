@@ -66,19 +66,14 @@ def get_pivots(
 
     Expansion progresiva de historial (1..anios_historico años), igual que
     PivotsAlpaca: si el primer año ya encuentra suficientes pivotes fuertes,
-    no se pide mas historial. El ATR se calcula una sola vez, con el primer
-    año que alcance para calcularlo, y se reusa en las expansiones
-    siguientes (igual que el original: no se recalcula al crecer el
-    historial). Los pivotes debiles solo se buscan en el ultimo intento (el
-    de historial mas profundo), como relleno final si aun faltan fuertes.
-
-    El historial se pide UNA SOLA VEZ (el maximo de anios_historico) y cada
-    "año" de la expansion recorta ese mismo resultado por la cola (viene
-    ordenado ascendente, mas reciente al final) en vez de volver a pedirlo
-    -- antes cada año disparaba su PROPIA llamada a
-    /marketdata/historical/batch, sin reusar nada de la anterior. Confirmado
-    en vivo el 2026-09-18: 51s totales para AAPL, con la ultima llamada (el
-    rango mas grande) sola tardando 37.6s del lado de marketdata-service.
+    no se pide mas historial -- para la mayoria de los simbolos esto basta,
+    y evita tocar chunks viejos comprimidos de TimescaleDB (mas lentos de
+    leer) que solo hacen falta para el caso raro que necesita años de
+    historial. El ATR se calcula una sola vez, con el primer año que
+    alcance para calcularlo, y se reusa en las expansiones siguientes
+    (igual que el original: no se recalcula al crecer el historial). Los
+    pivotes debiles solo se buscan en el ultimo intento (el de historial
+    mas profundo), como relleno final si aun faltan fuertes.
     """
     current_price = _resolve_current_price(symbol, price_reference, explicit_price)
     if current_price is None:
@@ -90,8 +85,6 @@ def get_pivots(
             detail = "No hay suficiente historial D1 para este símbolo"
         raise HTTPException(status_code=404, detail=detail)
 
-    candles_max = _fetch_clean_candles(symbol, anios_historico)
-
     atr = None
     resistencias_fuertes: list = []
     soportes_fuertes: list = []
@@ -99,7 +92,7 @@ def get_pivots(
     valleys: list = []
 
     for year in range(1, anios_historico + 1):
-        candles = candles_max[-_bars_for_years(year):]
+        candles = _fetch_clean_candles(symbol, year)
         if len(candles) < atr_length + 1:
             continue
 

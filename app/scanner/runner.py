@@ -155,10 +155,10 @@ def _do_cycle(escaner: Escaner, pipeline: SymbolPipeline, watcher=None):
 
 
 def _publish_signals(escaner: Escaner, signals: dict, nuevos: set):
-    from app.infrastructure.output.kafka_producer import publish_signals as kafka_publish
+    from app.infrastructure.output.event_ws_producer import publish_signals as ws_publish
     logger.info("SIGNALS: scanner='%s' id=%d count=%d",
                 escaner.nombre, escaner.idEscaner, len(signals))
-    kafka_publish(escaner.idEscaner, escaner.nombre, signals, nuevos)
+    ws_publish(escaner.idEscaner, escaner.nombre, signals, nuevos)
 
 
 def _run_daily(escaner: Escaner, pipeline: SymbolPipeline, orchestrator_pid: int, watcher=None):

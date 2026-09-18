@@ -235,7 +235,7 @@ class SymbolPipeline:
         para cubrir simbolos que se senializaron en ciclos anteriores de hoy.
 
         Si el escaner tiene permitirMultiplesSenales=true, esta exclusion se
-        salta por completo -- kafka_producer.publish_signals ya solo publica
+        salta por completo -- event_ws_producer.publish_signals ya solo publica
         `nuevos` (ver runner.py/_publish_signals), asi que un simbolo que
         sigue calificando sin interrupcion no se re-publica cada ciclo; lo
         que si vuelve a pasar es que si deja de calificar y despues vuelve a

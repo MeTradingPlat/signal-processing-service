@@ -1,11 +1,10 @@
 import logging
-from datetime import datetime, timezone
 from typing import Callable
 
 from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
-from app.scanner.marketdata_models import CandleResponse
+from app.scanner.buffered_candle import BufferedCandle, candle_from_bar
 from app.scanner.realtime_candle_client import RealtimeCandleClient
 from app.scanner.timeframe import minutos_to_label
 from app.strategies.base import MarketData
@@ -14,15 +13,6 @@ from app.strategies.registry import get_strategy
 logger = logging.getLogger(__name__)
 
 _MAX_BUFFERED_BARS = 200
-
-
-def _to_candle(symbol: str, bar: dict) -> CandleResponse:
-    return CandleResponse(
-        symbol=symbol,
-        timestamp=datetime.fromtimestamp(bar["time"], tz=timezone.utc),
-        open=bar.get("open"), high=bar.get("high"), low=bar.get("low"),
-        close=bar.get("close"), volume=bar.get("volume"),
-    )
 
 
 def _todos_los_requeridos_pasan(filtros: list[Filtro], resultados: list[bool]) -> bool:
@@ -77,7 +67,7 @@ class RealtimeFilterWatcher:
         self._escaner = escaner
         self._publish_signal = publish_signal
         self._grupos: list[tuple[int, str, list[Filtro]]] = []
-        self._candles: dict[tuple[str, str], list[CandleResponse]] = {}
+        self._candles: dict[tuple[str, str], list[BufferedCandle]] = {}
         self._zonas: dict[str, tuple[float, float]] = {}
         self._group_matches: dict[str, dict[int, list[SignalMatch]]] = {}
         self._stage: dict[str, int] = {}
@@ -125,9 +115,15 @@ class RealtimeFilterWatcher:
             for i in range(min(stage, len(self._grupos) - 1) + 1):
                 keys.add((symbol, self._grupos[i][1]))
         self._client.update_subscriptions(keys)
+        for key in [k for k in self._candles if k not in keys]:
+            del self._candles[key]
+
+    def buffer_stats(self) -> tuple[int, int]:
+        buffers = list(self._candles.values())
+        return len(buffers), sum(len(b) for b in buffers)
 
     def _on_history(self, symbol: str, timeframe: str, bars: list[dict]) -> None:
-        self._candles[(symbol, timeframe)] = [_to_candle(symbol, b) for b in bars if b.get("closed")]
+        self._candles[(symbol, timeframe)] = [candle_from_bar(symbol, b) for b in bars if b.get("closed")]
 
     def _indice_grupo(self, tf_label: str) -> int | None:
         for i, (_, label, _) in enumerate(self._grupos):
@@ -148,7 +144,7 @@ class RealtimeFilterWatcher:
 
         key = (symbol, timeframe)
         candles = self._candles.setdefault(key, [])
-        candles.append(_to_candle(symbol, bar))
+        candles.append(candle_from_bar(symbol, bar))
         del candles[:-_MAX_BUFFERED_BARS]
 
         j = self._indice_grupo(timeframe)

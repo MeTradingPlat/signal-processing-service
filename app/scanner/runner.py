@@ -9,6 +9,7 @@ from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
 from app.scanner.calendar import effective_end, effective_start, is_within_window, next_trading_window
+from app.scanner.memory_stats_loop import start_memory_stats_loop
 from app.scanner.symbols import SymbolPipeline
 from app.scanner.timeframe import agrupar_por_timeframe
 
@@ -85,6 +86,10 @@ def run_scanner(escaner: Escaner):
         escaner.objTipoEjecucion.enumTipoEjecucion,
         escaner.horaInicio, escaner.horaFin,
         len(pipeline.pre_filtros), len(pipeline.tecnicos),
+    )
+
+    start_memory_stats_loop(
+        escaner.idEscaner, watcher.buffer_stats if watcher is not None else (lambda: (0, 0)),
     )
 
     pipeline.cargar_todos()

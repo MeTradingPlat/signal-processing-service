@@ -239,3 +239,18 @@ def test_grupo_grueso_que_deja_de_calificar_degrada_y_desuscribe():
 
     assert watcher._client.subscriptions == {("AAPL", "D1")}
     assert published == []
+
+
+def test_simbolo_que_sale_del_universo_libera_su_buffer_de_velas():
+    watcher, _ = _make_watcher()
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
+    watcher.actualizar_universo({"AAPL", "MSFT"})
+    for symbol in ("AAPL", "MSFT"):
+        watcher._client.on_history(symbol, "M1", [
+            {"time": 1_700_000_000, "open": 10, "high": 10, "low": 9, "close": 9.5, "closed": True},
+        ])
+    assert watcher.buffer_stats() == (2, 2)
+
+    watcher.actualizar_universo({"AAPL"})
+
+    assert watcher.buffer_stats() == (1, 1)

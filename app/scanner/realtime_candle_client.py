@@ -22,6 +22,17 @@ def _group_by_timeframe(keys: set[tuple[str, str]]) -> dict[str, list[str]]:
     return by_timeframe
 
 
+def _frames(action: str, keys: set[tuple[str, str]],
+            bars_for: Callable[[str], int] | None) -> list[dict]:
+    frames = []
+    for timeframe, symbols in _group_by_timeframe(keys).items():
+        frame = {"action": action, "symbols": symbols, "timeframe": timeframe}
+        if action == "subscribe" and bars_for is not None:
+            frame["bars"] = bars_for(timeframe)
+        frames.append(frame)
+    return frames
+
+
 class RealtimeCandleClient:
     """Cliente WS hacia /ws/candles de marketdata-service -- el mismo
     endpoint que ya usa el frontend (candle-stream.service.ts) para
@@ -30,8 +41,10 @@ class RealtimeCandleClient:
     cliente Angular, adaptado a un hilo de fondo sincrono en vez de RxJS."""
 
     def __init__(self, ws_url: str, on_history: Callable[[str, str, list[dict]], None],
-                 on_bar: Callable[[str, str, dict], None]):
+                 on_bar: Callable[[str, str, dict], None],
+                 bars_for: Callable[[str], int] | None = None):
         self._ws_url = ws_url
+        self._bars_for = bars_for
         self._on_history = on_history
         self._on_bar = on_bar
         self._lock = threading.Lock()
@@ -71,8 +84,8 @@ class RealtimeCandleClient:
         el mismo socket (confirmado que eso tardaba un buen rato en ponerse
         al dia). El servidor ya soporta `symbols` en vez de `symbol` para
         esto (ver candleSubscribeRequest en candle_ws_session.go)."""
-        for timeframe, symbols in _group_by_timeframe(keys).items():
-            self._send({"action": action, "symbols": symbols, "timeframe": timeframe})
+        for frame in _frames(action, keys, self._bars_for):
+            self._send(frame)
 
     def _send(self, frame: dict) -> None:
         try:

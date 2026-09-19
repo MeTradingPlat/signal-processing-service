@@ -6,13 +6,14 @@ from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
 from app.scanner.buffered_candle import BufferedCandle, candle_from_bar
 from app.scanner.realtime_candle_client import RealtimeCandleClient
-from app.scanner.timeframe import minutos_to_label
+from app.scanner.timeframe import bars_necesarias_grupo, minutos_to_label
 from app.strategies.base import MarketData
 from app.strategies.registry import get_strategy
 
 logger = logging.getLogger(__name__)
 
-_MAX_BUFFERED_BARS = 200
+_FALLBACK_BARS = 200
+_MAX_REQUESTED_BARS = 2000
 
 
 def _todos_los_requeridos_pasan(filtros: list[Filtro], resultados: list[bool]) -> bool:
@@ -72,7 +73,8 @@ class RealtimeFilterWatcher:
         self._group_matches: dict[str, dict[int, list[SignalMatch]]] = {}
         self._stage: dict[str, int] = {}
         self._signaling: set[str] = set()
-        self._client = client_factory(ws_url, self._on_history, self._on_bar)
+        self._capped_timeframes: set[str] = set()
+        self._client = client_factory(ws_url, self._on_history, self._on_bar, self._bars_for)
 
     def configurar_grupos(self, grupos: dict[int, list[Filtro]]) -> None:
         """Se llama una sola vez al arrancar el escaner -- los filtros
@@ -118,12 +120,24 @@ class RealtimeFilterWatcher:
         for key in [k for k in self._candles if k not in keys]:
             del self._candles[key]
 
+    def _bars_for(self, timeframe: str) -> int:
+        j = self._indice_grupo(timeframe)
+        if j is None:
+            return _FALLBACK_BARS
+        minutos, label, filtros = self._grupos[j]
+        needed = bars_necesarias_grupo(filtros, minutos) + 1
+        if needed > _MAX_REQUESTED_BARS and label not in self._capped_timeframes:
+            self._capped_timeframes.add(label)
+            logger.warning("RealtimeFilterWatcher: escaner=%d %s necesita %d barras, se acota a %d",
+                           self._escaner.idEscaner, label, needed, _MAX_REQUESTED_BARS)
+        return min(needed, _MAX_REQUESTED_BARS)
+
     def buffer_stats(self) -> tuple[int, int]:
         buffers = list(self._candles.values())
         return len(buffers), sum(len(b) for b in buffers)
 
     def _on_history(self, symbol: str, timeframe: str, bars: list[dict]) -> None:
-        closed = [b for b in bars if b.get("closed")][-_MAX_BUFFERED_BARS:]
+        closed = [b for b in bars if b.get("closed")][-self._bars_for(timeframe):]
         self._candles[(symbol, timeframe)] = [candle_from_bar(symbol, b) for b in closed]
 
     def _indice_grupo(self, tf_label: str) -> int | None:
@@ -146,7 +160,7 @@ class RealtimeFilterWatcher:
         key = (symbol, timeframe)
         candles = self._candles.setdefault(key, [])
         candles.append(candle_from_bar(symbol, bar))
-        del candles[:-_MAX_BUFFERED_BARS]
+        del candles[:-self._bars_for(timeframe)]
 
         j = self._indice_grupo(timeframe)
         if j is None:

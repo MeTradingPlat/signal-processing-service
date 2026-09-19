@@ -3,7 +3,7 @@ from datetime import time
 from app.models.enums import EnumCondicional, EnumEstadoEscaner, EnumFiltro, EnumParametro, EnumTipoEjecucion
 from app.models.escaner import Escaner, EstadoEscaner, TipoEjecucion
 from app.models.filtro import Filtro, Parametro
-from app.models.valor import ValorCondicional, ValorFloat, ValorString
+from app.models.valor import ValorCondicional, ValorFloat, ValorInteger, ValorString
 from app.scanner.realtime_filter_watcher import RealtimeFilterWatcher
 
 
@@ -12,8 +12,9 @@ class _FakeCandleClient:
     real, solo guarda las suscripciones pedidas y deja que el test dispare
     _on_history/_on_bar a mano."""
 
-    def __init__(self, ws_url, on_history, on_bar):
+    def __init__(self, ws_url, on_history, on_bar, bars_for=None):
         self.ws_url = ws_url
+        self.bars_for = bars_for
         self.on_history = on_history
         self.on_bar = on_bar
         self.subscriptions: set = set()
@@ -256,6 +257,36 @@ def test_simbolo_que_sale_del_universo_libera_su_buffer_de_velas():
     assert watcher.buffer_stats() == (1, 1)
 
 
+def _filtro_volume_spike(n_velas: int) -> Filtro:
+    return Filtro(
+        enumFiltro=EnumFiltro.VOLUME_SPIKE,
+        parametros=[Parametro(enumParametro=EnumParametro.NUMERO_VELAS_VOLUME_SPIKE,
+                              objValorSeleccionado=ValorInteger(valor=n_velas))],
+    )
+
+
+def test_barras_pedidas_dependen_de_la_config_de_los_filtros_del_grupo():
+    watcher, _ = _make_watcher()
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()], 5: [_filtro_volume_spike(300)]})
+
+    assert watcher._bars_for("M1") == 151
+    assert watcher._bars_for("M5") == 302
+
+
+def test_barras_pedidas_se_acotan_al_maximo_permitido():
+    watcher, _ = _make_watcher()
+    watcher.configurar_grupos({1: [_filtro_volume_spike(50_000)]})
+
+    assert watcher._bars_for("M1") == 2000
+
+
+def test_cliente_recibe_la_funcion_que_calcula_las_barras():
+    watcher, _ = _make_watcher()
+    watcher.configurar_grupos({1: [_filtro_volume_spike(40)]})
+
+    assert watcher._client.bars_for("M1") == 151
+
+
 def test_historial_inicial_se_recorta_al_maximo_del_buffer():
     watcher, _ = _make_watcher()
     watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
@@ -267,6 +298,6 @@ def test_historial_inicial_se_recorta_al_maximo_del_buffer():
 
     watcher._client.on_history("AAPL", "M1", bars)
 
-    assert watcher.buffer_stats() == (1, 200)
+    assert watcher.buffer_stats() == (1, 151)
     ultima = watcher._candles[("AAPL", "M1")][-1]
     assert int(ultima.timestamp.timestamp()) == 1_700_000_000 + 499 * 60

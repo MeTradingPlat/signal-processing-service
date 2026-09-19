@@ -27,3 +27,18 @@ def test_volume_dinamico_se_mantiene():
     estaticos, dinamicos, tecnicos = categorizar_filtros(filtros)
     assert len(dinamicos) == 1
     assert tecnicos == []
+
+
+def test_barras_requeridas_de_volume_spike_y_crossing_siguen_la_config():
+    from app.models.enums import EnumFiltro, EnumParametro
+    from app.models.filtro import Filtro, Parametro
+    from app.models.valor import ValorInteger
+    from app.scanner.timeframe import bars_requeridas_filtro
+
+    def filtro(enum_filtro, parametro, valor):
+        return Filtro(enumFiltro=enum_filtro, parametros=[
+            Parametro(enumParametro=parametro, objValorSeleccionado=ValorInteger(valor=valor))])
+
+    assert bars_requeridas_filtro(filtro(EnumFiltro.VOLUME_SPIKE, EnumParametro.NUMERO_VELAS_VOLUME_SPIKE, 300), 1) == 301
+    assert bars_requeridas_filtro(
+        filtro(EnumFiltro.CROSSING_ABOVE_BELOW, EnumParametro.PERIODO_EMA_CROSSING_ABOVE_BELOW, 100), 1) == 101

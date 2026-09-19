@@ -123,7 +123,8 @@ class RealtimeFilterWatcher:
         return len(buffers), sum(len(b) for b in buffers)
 
     def _on_history(self, symbol: str, timeframe: str, bars: list[dict]) -> None:
-        self._candles[(symbol, timeframe)] = [candle_from_bar(symbol, b) for b in bars if b.get("closed")]
+        closed = [b for b in bars if b.get("closed")][-_MAX_BUFFERED_BARS:]
+        self._candles[(symbol, timeframe)] = [candle_from_bar(symbol, b) for b in closed]
 
     def _indice_grupo(self, tf_label: str) -> int | None:
         for i, (_, label, _) in enumerate(self._grupos):

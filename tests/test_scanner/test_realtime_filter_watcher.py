@@ -254,3 +254,19 @@ def test_simbolo_que_sale_del_universo_libera_su_buffer_de_velas():
     watcher.actualizar_universo({"AAPL"})
 
     assert watcher.buffer_stats() == (1, 1)
+
+
+def test_historial_inicial_se_recorta_al_maximo_del_buffer():
+    watcher, _ = _make_watcher()
+    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
+    watcher.actualizar_universo({"AAPL"})
+    bars = [
+        {"time": 1_700_000_000 + i * 60, "open": 10, "high": 11, "low": 9, "close": 10, "closed": True}
+        for i in range(500)
+    ]
+
+    watcher._client.on_history("AAPL", "M1", bars)
+
+    assert watcher.buffer_stats() == (1, 200)
+    ultima = watcher._candles[("AAPL", "M1")][-1]
+    assert int(ultima.timestamp.timestamp()) == 1_700_000_000 + 499 * 60

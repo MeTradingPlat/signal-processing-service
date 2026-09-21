@@ -6,7 +6,11 @@ import os
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not os.environ.get("METRADINGPLAT_API_PASSWORD"),
+                       reason="define METRADINGPLAT_API_PASSWORD para correr esta prueba contra la API real"),
+]
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -39,7 +43,9 @@ from app.strategies.base import MarketData
 BASE = "https://api.metradingplat.net"
 
 def auth():
-    data = json.dumps({"username": "admin", "password": "REMOVED_CREDENTIAL"}).encode()
+    credentials = {"username": os.environ.get("METRADINGPLAT_API_USER", "admin"),
+                   "password": os.environ["METRADINGPLAT_API_PASSWORD"]}
+    data = json.dumps(credentials).encode()
     req = urllib.request.Request(f"{BASE}/auth/login", data=data,
         headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req) as r:
@@ -53,8 +59,7 @@ def request(token, method, path, body=None):
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
 
-@pytest.mark.integration
-def test_symbol(sym, token):
+def check_symbol(sym, token):
     print(f"\n{'='*60}")
     print(f"Testing: {sym}")
     print(f"{'='*60}")
@@ -140,8 +145,13 @@ def test_symbol(sym, token):
     return results
 
 
+@pytest.mark.parametrize("sym", ["AAPL", "GME"])
+def test_estrategias_contra_marketdata_real(sym):
+    check_symbol(sym, auth())
+
+
 if __name__ == "__main__":
     token = auth()
     print("Auth OK")
     for sym in ["AAPL", "GME"]:
-        test_symbol(sym, token)
+        check_symbol(sym, token)

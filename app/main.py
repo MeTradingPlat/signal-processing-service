@@ -25,7 +25,14 @@ def _setup_logging():
     )
 
 
-def _monitor_orchestrator(process_holder: list, child_conn):
+def _spawn_orchestrator(child_conn) -> Process:
+    process = Process(target=run_orchestrator, args=(child_conn,), name="orchestrator")
+    process.start()
+    return process
+
+
+def _monitor_orchestrator(process_holder: list, child_conn, spawn=_spawn_orchestrator,
+                          restart_delay: float | None = None, stop: threading.Event | None = None):
     # process_holder es una caja mutable de 1 elemento, no un Process suelto
     # -- _shutdown() en main() lee process_holder[0] para saber a que
     # proceso mandarle la señal. Con un parametro Process comun, reasignar
@@ -34,22 +41,20 @@ def _monitor_orchestrator(process_holder: list, child_conn):
     # muerto) -- terminate()/join() quedaban apuntando a un proceso zombie
     # y el orquestador real (mas los escaneres que tiene activos) nunca
     # recibia la señal de apagado.
-    while True:
+    delay = _RESTART_DELAY if restart_delay is None else restart_delay
+    while stop is None or not stop.is_set():
         process_holder[0].join()
+        if stop is not None and stop.is_set():
+            return
         exit_code = process_holder[0].exitcode
         logger.error(
             "Launcher: orchestrator died pid=%d exitcode=%s, restarting in %.0fs",
             process_holder[0].pid,
             exit_code,
-            _RESTART_DELAY,
+            delay,
         )
-        time.sleep(_RESTART_DELAY)
-        new_process = Process(
-            target=run_orchestrator,
-            args=(child_conn,),
-            name="orchestrator",
-        )
-        new_process.start()
+        time.sleep(delay)
+        new_process = spawn(child_conn)
         process_holder[0] = new_process
         logger.info("Launcher: orchestrator restarted pid=%d", new_process.pid)
 

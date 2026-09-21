@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, time, timezone
 from multiprocessing import Process
 from unittest.mock import patch
@@ -70,6 +71,20 @@ def test_una_vez_scanner_resumes_immediately_when_restarted_mid_window():
     mock_next_window.assert_not_called()
 
 
+@pytest.fixture(autouse=True)
+def _sin_espera_de_reintentos(monkeypatch):
+    import app.scanner.symbols as symbols_module
+
+    monkeypatch.setattr(symbols_module, "_FETCH_SYMBOLS_RETRY_BACKOFF_SECONDS", 0.0)
+
+
+def _run_once_sin_espera_de_reintentos(escaner, now):
+    import app.scanner.symbols as symbols_module
+
+    symbols_module._FETCH_SYMBOLS_RETRY_BACKOFF_SECONDS = 0.0
+    _run_once(escaner, now)
+
+
 def test_una_vez_registry_detects_completion():
     registry = ProcessRegistry()
 
@@ -83,14 +98,13 @@ def test_una_vez_registry_detects_completion():
         objTipoEjecucion=TipoEjecucion(enumTipoEjecucion=EnumTipoEjecucion.UNA_VEZ),
     )
 
-    process = Process(target=_run_once, args=(escaner, now), daemon=False)
+    process = Process(target=_run_once_sin_espera_de_reintentos, args=(escaner, now), daemon=False)
     process.start()
     registry.add(2, process)
 
-    # cargar_todos() ahora reintenta con backoff antes de rendirse (hasta
-    # ~9s sin red, ver test_symbols_retry.py) -- el timeout de join tiene
-    # que cubrir eso, no solo el tiempo de un fetch que falla al instante.
-    process.join(timeout=15)
+    # El hijo arranca con el backoff de reintentos en 0 (ver el wrapper de
+    # arriba): sin eso tardaba ~13s, casi el limite del join.
+    process.join(timeout=30)
 
     completed = registry.collect_completed()
     assert 2 in completed

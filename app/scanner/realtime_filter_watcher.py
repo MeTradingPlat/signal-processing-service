@@ -86,6 +86,7 @@ class RealtimeFilterWatcher:
         self._signaling: set[str] = set()
         self._capped_timeframes: set[str] = set()
         self._keys_por_symbol: dict[str, set[tuple[str, str]]] = {}
+        self._pares_por_grupo: dict[int, list] = {}
         self._lock = threading.RLock()
         self._state = SessionState(profile_loader)
         self._client = client_factory(ws_url, self._on_history, self._on_bar, self._bars_for)
@@ -99,6 +100,7 @@ class RealtimeFilterWatcher:
             for minutos, filtros in sorted(grupos.items(), key=lambda kv: -kv[0])
         ]
         self._state.configurar(self._grupos)
+        self._pares_por_grupo = {}
 
     @_locked
     def actualizar_universo(self, filtrados: set[str]) -> None:
@@ -211,7 +213,15 @@ class RealtimeFilterWatcher:
         self._state.actualizar(symbol, timeframe, candle)
         candles.append(candle)
         del candles[:-self._buffer_for(timeframe)]
+        self._evaluar(symbol, timeframe, candles)
 
+    def _pares_de(self, j: int, filtros: list[Filtro]) -> list:
+        pares = self._pares_por_grupo.get(j)
+        if pares is None:
+            pares = self._pares_por_grupo[j] = [(f, get_strategy(f)) for f in filtros]
+        return pares
+
+    def _evaluar(self, symbol: str, timeframe: str, candles: list[BufferedCandle]) -> None:
         j = self._indice_grupo(timeframe)
         if j is None:
             return
@@ -228,7 +238,10 @@ class RealtimeFilterWatcher:
         data = MarketData(symbol=symbol, candles=candles, zona=self._zonas.get(symbol),
                           day=self._state.day(symbol, timeframe),
                           volume_profile=self._state.profile(symbol, timeframe))
-        pares = [(f, get_strategy(f)) for f in filtros]
+        pares = self._pares_de(j, filtros)
+        for _f, estrategia in pares:
+            if hasattr(estrategia, "ultima_zona"):
+                estrategia.ultima_zona = None
         resultados = [estrategia.evaluate(data) for _f, estrategia in pares]
         paso = _todos_los_requeridos_pasan(filtros, resultados)
 
@@ -256,9 +269,12 @@ class RealtimeFilterWatcher:
     def _aplicar_correccion(self, symbol: str, timeframe: str, bar: dict) -> None:
         """marketdata reenvia una vela ya cerrada con datos corregidos (un tick
         tardio de dxFeed): se reemplaza la que ya estaba en el buffer, con el
-        mismo timestamp, y se ajusta el resumen del dia. No se reevalua ningun
-        filtro -- la señal que ya se decidio no se revierte, y la siguiente
-        vela se evalua con el dato corregido."""
+        mismo timestamp, y se ajusta el resumen del dia. Solo si es la ULTIMA
+        vela del buffer se reevalua el grupo, igual que con una vela nueva
+        (puede promover al simbolo, o publicar una señal que la vela sin
+        corregir no alcanzo): una señal ya publicada nunca se retira ni se
+        revierte, es un hecho del historial, y _completar_cadena no repite la
+        de un simbolo que ya estaba calificando."""
         candles = self._candles.get((symbol, timeframe))
         if not candles:
             return
@@ -267,6 +283,8 @@ class RealtimeFilterWatcher:
             if candles[i].timestamp == corregida.timestamp:
                 anterior, candles[i] = candles[i], corregida
                 self._state.corregir(symbol, timeframe, anterior, corregida)
+                if i == len(candles) - 1:
+                    self._evaluar(symbol, timeframe, candles)
                 return
 
     def _degradar(self, symbol: str, grupo_index: int) -> None:

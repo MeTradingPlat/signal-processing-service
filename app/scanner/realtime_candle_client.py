@@ -53,6 +53,7 @@ class RealtimeCandleClient:
         self._desired: set[tuple[str, str]] = set()
         self._subscribed: set[tuple[str, str]] = set()
         self._ws = None
+        self._last_seq: dict[tuple[str, str], int] = {}
         self._reconnect_attempts = 0
         self._stop = False
         self._thread = threading.Thread(target=self._run_forever, daemon=True, name="realtime-candle-client")
@@ -144,6 +145,7 @@ class RealtimeCandleClient:
         # _reconnect_attempts=0): reintentaba cada 3s indefinidamente contra
         # un servidor caido en vez de espaciarse hasta 30s.
         self._reconnect_attempts = 0
+        self._last_seq.clear()
         with self._lock:
             self._subscribed = set()
         self._sync_subscriptions()
@@ -155,6 +157,35 @@ class RealtimeCandleClient:
             return
         msg_type = msg.get("type")
         if msg_type == "history":
+            self._last_seq[(msg["symbol"], msg["timeframe"])] = 0
             self._on_history(msg["symbol"], msg["timeframe"], msg.get("bars", []))
         elif msg_type == "bar" and msg.get("bar", {}).get("closed"):
+            if self._hay_hueco_de_secuencia(msg["symbol"], msg["timeframe"], msg["bar"]):
+                return
             self._on_bar(msg["symbol"], msg["timeframe"], msg["bar"])
+
+    def _hay_hueco_de_secuencia(self, symbol: str, timeframe: str, bar: dict) -> bool:
+        """marketdata numera las velas cerradas nuevas de cada suscripcion
+        (seq, desde 1). Un salto significa que se perdio una: se pide el
+        historial de esa serie de nuevo y esta vela se descarta, porque el
+        historial nuevo ya la trae. Un numero repetido o anterior es un
+        rezago de antes del reinicio de la serie y tambien se descarta."""
+        seq = bar.get("seq")
+        if seq is None or bar.get("corrected"):
+            return False
+        key = (symbol, timeframe)
+        last = self._last_seq.get(key)
+        if last is None or seq == last + 1:
+            self._last_seq[key] = seq
+            return False
+        if seq > last + 1:
+            logger.warning("RealtimeCandleClient: hueco de secuencia %s %s (esperaba %d, llego %d), pidiendo historial",
+                           symbol, timeframe, last + 1, seq)
+            self._resync(symbol, timeframe)
+        return True
+
+    def _resync(self, symbol: str, timeframe: str) -> None:
+        self._last_seq.pop((symbol, timeframe), None)
+        self._send({"action": "unsubscribe", "symbols": [symbol], "timeframe": timeframe})
+        for frame in _frames("subscribe", {(symbol, timeframe)}, self._bars_for):
+            self._send(frame)

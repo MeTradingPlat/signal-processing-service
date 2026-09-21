@@ -299,21 +299,82 @@ def test_una_correccion_reemplaza_la_vela_del_buffer_y_ajusta_el_resumen_del_dia
     assert resumen.first.volume == 120
 
 
-def test_una_correccion_no_agrega_velas_ni_reevalua_filtros():
+class _EstrategiaVolumenMinimo:
+    def __init__(self, minimo):
+        self.minimo = minimo
+        self.evaluaciones = 0
+
+    def evaluate(self, data):
+        self.evaluaciones += 1
+        return data.candles[-1].volume >= self.minimo
+
+
+def _watcher_con_estrategia(monkeypatch, estrategia):
+    from app.scanner import realtime_filter_watcher as modulo
+
+    llamadas = []
+    monkeypatch.setattr(modulo, "get_strategy", lambda f: llamadas.append(f) or estrategia)
     publicadas = []
     watcher = RealtimeFilterWatcher(
-        _escaner(), "ws://x/ws/candles", publish_signal=lambda *a: publicadas.append(a),
+        _escaner(), "ws://x/ws/candles", publish_signal=lambda esc, symbol, matches: publicadas.append(symbol),
         client_factory=_FakeCandleClient)
     watcher.configurar_grupos({1: [Filtro(enumFiltro=EnumFiltro.PIVOTS)]})
     watcher.actualizar_universo({"AAPL"})
+    return watcher, publicadas, llamadas
+
+
+def _corregida(minuto, volume):
+    bar = _bar_dict(minuto, volume=volume)
+    bar["corrected"] = True
+    return bar
+
+
+def test_una_correccion_de_la_ultima_vela_publica_la_senal_que_la_vela_original_no_alcanzo(monkeypatch):
+    watcher, publicadas, _ = _watcher_con_estrategia(monkeypatch, _EstrategiaVolumenMinimo(100))
+    watcher._on_history("AAPL", "M1", [_bar_dict(0)])
+    watcher._on_bar("AAPL", "M1", _bar_dict(1, volume=50))
+    assert publicadas == []
+
+    watcher._on_bar("AAPL", "M1", _corregida(1, 150))
+    watcher._on_bar("AAPL", "M1", _corregida(1, 160))
+
+    assert publicadas == ["AAPL"]
+    assert len(watcher._candles[("AAPL", "M1")]) == 2
+
+
+def test_una_correccion_que_hace_fallar_a_un_simbolo_no_retira_la_senal_ya_publicada(monkeypatch):
+    watcher, publicadas, _ = _watcher_con_estrategia(monkeypatch, _EstrategiaVolumenMinimo(100))
+    watcher._on_history("AAPL", "M1", [_bar_dict(0)])
+    watcher._on_bar("AAPL", "M1", _bar_dict(1, volume=150))
+    assert publicadas == ["AAPL"]
+
+    watcher._on_bar("AAPL", "M1", _corregida(1, 40))
+
+    assert publicadas == ["AAPL"]
+    assert "AAPL" not in watcher._signaling
+
+
+def test_una_correccion_de_una_vela_que_no_es_la_ultima_no_reevalua(monkeypatch):
+    estrategia = _EstrategiaVolumenMinimo(100)
+    watcher, publicadas, _ = _watcher_con_estrategia(monkeypatch, estrategia)
+    watcher._on_history("AAPL", "M1", [_bar_dict(0), _bar_dict(1)])
+    watcher._on_bar("AAPL", "M1", _bar_dict(2, volume=10))
+    antes = estrategia.evaluaciones
+
+    watcher._on_bar("AAPL", "M1", _corregida(0, 999))
+
+    assert estrategia.evaluaciones == antes
+    assert publicadas == []
+
+
+def test_las_estrategias_de_un_grupo_se_crean_una_sola_vez(monkeypatch):
+    watcher, _, llamadas = _watcher_con_estrategia(monkeypatch, _EstrategiaVolumenMinimo(1000))
     watcher._on_history("AAPL", "M1", [_bar_dict(0)])
 
-    corregida = _bar_dict(0, volume=999)
-    corregida["corrected"] = True
-    watcher._on_bar("AAPL", "M1", corregida)
+    for minuto in range(1, 6):
+        watcher._on_bar("AAPL", "M1", _bar_dict(minuto))
 
-    assert len(watcher._candles[("AAPL", "M1")]) == 1
-    assert publicadas == []
+    assert len(llamadas) == 1
 
 
 def test_una_correccion_de_una_vela_que_ya_salio_del_buffer_se_ignora():

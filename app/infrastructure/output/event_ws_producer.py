@@ -1,91 +1,23 @@
 import json
 import logging
-import threading
-import time
 from datetime import datetime, timezone
 
 from app.config import settings
+from app.infrastructure.output.outbound_event_ws_client import OutboundEventWebSocketClient
 from app.scanner.timeframe import extraer_timeframe_minutos, minutos_to_label
 
 logger = logging.getLogger(__name__)
-
-_RECONNECT_BASE_DELAY = 3.0
-_RECONNECT_MAX_DELAY = 30.0
-_PING_INTERVAL_SECONDS = 25
-_PING_TIMEOUT_SECONDS = 10
-
-
-class _OutboundEventWebSocketClient:
-    """Conexion WS saliente persistente con reconexion (mismo patron que
-    RealtimeCandleClient) -- reemplaza un KafkaProducer.send() puntual. Un
-    envio con la conexion caida se descarta (mismo best-effort que Kafka con
-    retries=3 y despues loguear el error), pero a diferencia del productor de
-    Kafka viejo, la reconexion la mantiene un hilo propio en vez de un objeto
-    cacheado para siempre que nunca se reintenta solo."""
-
-    def __init__(self, ws_url: str, etiqueta: str):
-        self._ws_url = ws_url
-        self._etiqueta = etiqueta
-        self._ws = None
-        self._reconnect_attempts = 0
-        self._stop = False
-        self._thread = threading.Thread(target=self._run_forever, daemon=True,
-                                         name=f"ws-out-{etiqueta}")
-        self._thread.start()
-
-    def send(self, payload: dict) -> None:
-        ws = self._ws
-        if ws is None:
-            logger.warning("%s: WS no disponible, se descarta el envio", self._etiqueta)
-            return
-        try:
-            ws.send(json.dumps(payload, default=str))
-        except Exception as e:
-            logger.error("%s: fallo enviando por WS: %s", self._etiqueta, e)
-
-    def stop(self) -> None:
-        self._stop = True
-        if self._ws is not None:
-            self._ws.close()
-
-    def _run_forever(self) -> None:
-        while not self._stop:
-            try:
-                import websocket
-                self._ws = websocket.WebSocketApp(
-                    self._ws_url,
-                    # El Gateway exige este header en todas las rutas internas
-                    # (GatewayHeaderFilter del lado Java) -- sin el, el
-                    # handshake devuelve 403 antes de abrir el socket. Mismo
-                    # requisito que ya usa RealtimeCandleClient.
-                    header=["X-Gateway-Passed: true"],
-                    on_open=lambda ws: self._on_open(),
-                    on_error=lambda ws, err: logger.warning("%s: ws error: %s", self._etiqueta, err),
-                )
-                self._ws.run_forever(ping_interval=_PING_INTERVAL_SECONDS, ping_timeout=_PING_TIMEOUT_SECONDS)
-            except Exception as e:
-                logger.warning("%s: connection failed: %s", self._etiqueta, e)
-            self._ws = None
-            if self._stop:
-                return
-            delay = min(_RECONNECT_BASE_DELAY * (2 ** self._reconnect_attempts), _RECONNECT_MAX_DELAY)
-            self._reconnect_attempts += 1
-            time.sleep(delay)
-
-    def _on_open(self) -> None:
-        logger.info("%s: connected to %s", self._etiqueta, self._ws_url)
-        self._reconnect_attempts = 0
 
 
 def _ws_url(http_url: str, path: str) -> str:
     return http_url.replace("http://", "ws://").replace("https://", "wss://") + path
 
 
-_log_service_client = _OutboundEventWebSocketClient(
+_log_service_client = OutboundEventWebSocketClient(
     _ws_url(settings.log_service_url, "/ws/internal/logs"), "log-service")
-_notification_service_client = _OutboundEventWebSocketClient(
+_notification_service_client = OutboundEventWebSocketClient(
     _ws_url(settings.notification_service_url, "/ws/internal/notificaciones/estado-escaner"), "notification-service")
-_scanner_management_client = _OutboundEventWebSocketClient(
+_scanner_management_client = OutboundEventWebSocketClient(
     _ws_url(settings.scanner_management_url, "/ws/internal/estado-escaner"), "scanner-management-service")
 
 

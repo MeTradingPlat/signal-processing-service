@@ -27,8 +27,10 @@ def _frames(action: str, keys: set[tuple[str, str]],
     frames = []
     for timeframe, symbols in _group_by_timeframe(keys).items():
         frame = {"action": action, "symbols": symbols, "timeframe": timeframe}
-        if action == "subscribe" and bars_for is not None:
-            frame["bars"] = bars_for(timeframe)
+        if action == "subscribe":
+            frame["closedOnly"] = True
+            if bars_for is not None:
+                frame["bars"] = bars_for(timeframe)
         frames.append(frame)
     return frames
 

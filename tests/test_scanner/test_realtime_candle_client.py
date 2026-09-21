@@ -23,12 +23,21 @@ def test_frames_de_suscripcion_incluyen_las_barras_de_cada_timeframe():
     assert {f["timeframe"]: f["bars"] for f in frames} == {"M1": 151, "D1": 60}
 
 
+def test_frames_de_suscripcion_piden_solo_velas_cerradas():
+    from app.scanner.realtime_candle_client import _frames
+
+    con_barras = _frames("subscribe", {("AAPL", "M1")}, lambda tf: 151)[0]
+    sin_barras = _frames("subscribe", {("AAPL", "M1")}, None)[0]
+
+    assert con_barras["closedOnly"] is True and sin_barras["closedOnly"] is True
+
+
 def test_frames_de_desuscripcion_no_llevan_barras():
     from app.scanner.realtime_candle_client import _frames
 
     frames = _frames("unsubscribe", {("AAPL", "M1")}, lambda tf: 151)
 
-    assert "bars" not in frames[0]
+    assert "bars" not in frames[0] and "closedOnly" not in frames[0]
 
 
 def test_frames_sin_funcion_de_barras_no_llevan_el_campo():

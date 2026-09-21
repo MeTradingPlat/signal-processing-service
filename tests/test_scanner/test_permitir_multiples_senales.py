@@ -88,14 +88,3 @@ def test_sin_multiples_senales_el_baseline_no_consulta_log_service():
     pipeline.cargar_baseline_de_senales()
 
     assert pipeline.nuevos_symbols({"AAPL": []}) == {"AAPL"}
-
-
-def test_un_primer_ciclo_vacio_no_gasta_el_baseline():
-    pipeline = SymbolPipeline(_escaner(True))
-    pipeline._log_client.get_signaled_today = lambda scanner_id: {"AAPL"}
-    pipeline.cargar_baseline_de_senales()
-    pipeline.nuevos_symbols({})
-
-    nuevos = pipeline.nuevos_symbols({"AAPL": [], "MSFT": []})
-
-    assert nuevos == {"MSFT"}

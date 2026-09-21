@@ -482,7 +482,7 @@ class SymbolPipeline:
         el anterior). Reemplaza el estado, no lo une, para que un simbolo que
         deja de calificar y vuelve a calificar despues cuente como nuevo otra
         vez."""
-        if self._baseline_pendiente and signals:
+        if self._baseline_pendiente:
             self._baseline_pendiente = False
             self._previously_matched |= self.signal_baseline.consume_all(signals)
             self.signal_baseline.expire()

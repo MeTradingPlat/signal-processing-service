@@ -12,6 +12,7 @@ from app.models.signal_match import SignalMatch
 from app.scanner.filter_categories import categorizar_filtros
 from app.scanner.marketdata_client import MarketdataClient
 from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
+from app.scanner.signal_baseline import SignalBaseline
 from app.scanner.timeframe import bars_necesarias_grupo, minutos_to_label
 from app.strategies.base import MarketData
 from app.strategies.registry import get_strategy
@@ -109,6 +110,8 @@ class SymbolPipeline:
         # que candidatos_previos_a_grupo.
         self.zonas: dict[str, tuple[float, float]] = {}
         self._previously_matched: set = set()
+        self.signal_baseline = SignalBaseline()
+        self._baseline_pendiente = True
         logger.info(
             "SymbolPipeline: id=%d mercados=%s estaticos=%d dinamicos=%d tecnicos=%d",
             escaner.idEscaner, self.mercados,
@@ -470,11 +473,19 @@ class SymbolPipeline:
         self.cargar_todos()
         self._previously_matched = set()
 
+    def cargar_baseline_de_senales(self) -> None:
+        self.signal_baseline = SignalBaseline.load(self._log_client, self.scanner_id, self.permitir_multiples_senales)
+        self._baseline_pendiente = True
+
     def nuevos_symbols(self, signals: dict) -> set:
         """Simbolos que empiezan a calificar en este ciclo (no calificaban en
         el anterior). Reemplaza el estado, no lo une, para que un simbolo que
         deja de calificar y vuelve a calificar despues cuente como nuevo otra
         vez."""
+        if self._baseline_pendiente:
+            self._baseline_pendiente = False
+            self._previously_matched |= self.signal_baseline.consume_all(signals)
+            self.signal_baseline.expire()
         nuevos = set(signals) - self._previously_matched
         self._previously_matched = set(signals)
         return nuevos

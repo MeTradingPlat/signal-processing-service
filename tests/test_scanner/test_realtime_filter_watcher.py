@@ -5,7 +5,6 @@ from app.models.escaner import Escaner, EstadoEscaner, TipoEjecucion
 from app.models.filtro import Filtro, Parametro
 from app.models.valor import ValorCondicional, ValorFloat, ValorInteger, ValorString
 from app.scanner.realtime_filter_watcher import RealtimeFilterWatcher
-from app.scanner.signal_baseline import SignalBaseline
 
 
 class _FakeCandleClient:
@@ -75,13 +74,12 @@ def _filtro_percentage_change() -> Filtro:
     )
 
 
-def _make_watcher(baseline=None):
+def _make_watcher():
     published = []
     watcher = RealtimeFilterWatcher(
         _escaner(), "ws://marketdata-service:8082/ws/candles",
         publish_signal=lambda escaner, symbol, matches: published.append((symbol, matches)),
         client_factory=_FakeCandleClient,
-        baseline=baseline,
     )
     return watcher, published
 
@@ -307,37 +305,3 @@ def test_historial_inicial_se_recorta_al_maximo_del_buffer():
     assert watcher.buffer_stats() == (1, 151)
     ultima = watcher._candles[("AAPL", "M1")][-1]
     assert int(ultima.timestamp.timestamp()) == 1_700_000_000 + 499 * 60
-
-
-def _confirmar_una_senal(watcher, symbol, t0):
-    watcher._client.on_history(symbol, "M1", [
-        {"time": t0, "open": 10, "high": 10, "low": 9, "close": 9.5, "closed": True},
-        {"time": t0 + 60, "open": 9.5, "high": 10.5, "low": 9.5, "close": 10, "closed": True},
-    ])
-    watcher._client.on_bar(symbol, "M1", {
-        "time": t0 + 120, "open": 11, "high": 15, "low": 11, "close": 15, "closed": True,
-    })
-
-
-def test_tras_un_reinicio_no_republica_un_simbolo_ya_senalizado_hoy():
-    watcher, published = _make_watcher(baseline=SignalBaseline({"AAPL"}))
-    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
-    watcher.actualizar_universo({"AAPL", "MSFT"})
-
-    _confirmar_una_senal(watcher, "AAPL", 1_700_000_000)
-    _confirmar_una_senal(watcher, "MSFT", 1_700_000_000)
-
-    assert [symbol for symbol, _ in published] == ["MSFT"]
-    assert "AAPL" in watcher._signaling
-
-
-def test_el_baseline_se_gasta_una_vez_y_la_proxima_calificacion_si_publica():
-    watcher, published = _make_watcher(baseline=SignalBaseline({"AAPL"}))
-    watcher.configurar_grupos({1: [_filtro_confirmation_candle()]})
-    watcher.actualizar_universo({"AAPL"})
-    _confirmar_una_senal(watcher, "AAPL", 1_700_000_000)
-    watcher._degradar("AAPL", 0)
-
-    _confirmar_una_senal(watcher, "AAPL", 1_700_001_000)
-
-    assert [symbol for symbol, _ in published] == ["AAPL"]

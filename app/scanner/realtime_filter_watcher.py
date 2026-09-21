@@ -9,7 +9,6 @@ from app.models.signal_match import SignalMatch
 from app.scanner.buffered_candle import BufferedCandle, candle_from_bar
 from app.scanner.realtime_candle_client import RealtimeCandleClient
 from app.scanner.session_state import ProfileLoader, SessionState
-from app.scanner.signal_baseline import SignalBaseline
 from app.scanner.timeframe import bars_buffer_grupo, bars_historial_grupo, minutos_to_label
 from app.strategies.base import MarketData
 from app.strategies.registry import get_strategy
@@ -76,10 +75,8 @@ class RealtimeFilterWatcher:
 
     def __init__(self, escaner: Escaner, ws_url: str,
                  publish_signal: Callable[[Escaner, str, list[SignalMatch]], None],
-                 client_factory=RealtimeCandleClient, profile_loader: ProfileLoader | None = None,
-                 baseline: SignalBaseline | None = None):
+                 client_factory=RealtimeCandleClient, profile_loader: ProfileLoader | None = None):
         self._escaner = escaner
-        self._baseline = baseline or SignalBaseline()
         self._publish_signal = publish_signal
         self._grupos: list[tuple[int, str, list[Filtro]]] = []
         self._candles: dict[tuple[str, str], list[BufferedCandle]] = {}
@@ -317,10 +314,6 @@ class RealtimeFilterWatcher:
         if symbol in self._signaling:
             return
         self._signaling.add(symbol)
-        if self._baseline.consume(symbol):
-            logger.info("RealtimeFilterWatcher: symbol=%s escaner=%d ya estaba señalizado antes del reinicio, no se republica",
-                        symbol, self._escaner.idEscaner)
-            return
         matches_por_grupo = self._group_matches.get(symbol, {})
         matches = [m for i in sorted(matches_por_grupo) for m in matches_por_grupo[i]]
         logger.info("RealtimeFilterWatcher: cadena completa symbol=%s escaner=%d filtros=%s",

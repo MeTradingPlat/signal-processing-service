@@ -33,7 +33,9 @@ def _build_realtime_watcher(escaner: Escaner, pipeline: SymbolPipeline):
         return None
     from app.scanner.realtime_filter_watcher import RealtimeFilterWatcher
     ws_url = settings.marketdata_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/candles"
-    watcher = RealtimeFilterWatcher(escaner, ws_url, _publish_realtime_signal)
+    from app.scanner.marketdata_client import MarketdataClient
+    watcher = RealtimeFilterWatcher(escaner, ws_url, _publish_realtime_signal,
+                                    profile_loader=MarketdataClient().fetch_volume_profiles)
     watcher.configurar_grupos(agrupar_por_timeframe(pipeline.tecnicos))
     return watcher
 

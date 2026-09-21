@@ -11,6 +11,7 @@ from app.scanner.marketdata_models import (
     FundamentalResponse,
 )
 from app.scanner.mappings import mercado_to_mic, timeframe_to_marketdata
+from app.scanner.volume_profile import VolumeProfile, profile_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,18 @@ class MarketdataClient:
                                  body={"symbols": chunk, "timeframe": tf, "bars": bars}, timeout=90)
             raw = data.get("candlesPorSimbolo", {})
             result.update({k: [CandleResponse(**c) for c in v] for k, v in raw.items()})
+        return result
+
+    _VOLUME_PROFILE_CHUNK_SIZE = 500
+
+    def fetch_volume_profiles(self, symbols: List[str], timeframe: str) -> dict[str, VolumeProfile]:
+        tf = timeframe_to_marketdata(timeframe)
+        result: dict[str, VolumeProfile] = {}
+        for i in range(0, len(symbols), self._VOLUME_PROFILE_CHUNK_SIZE):
+            chunk = symbols[i:i + self._VOLUME_PROFILE_CHUNK_SIZE]
+            data = self._request("POST", "/marketdata/volume-profile",
+                                 body={"symbols": chunk, "timeframe": tf}, timeout=60)
+            result.update({k: profile_from_response(v) for k, v in data.get("profiles", {}).items()})
         return result
 
     def fetch_current_prices(self, symbols: List[str]) -> dict[str, float]:

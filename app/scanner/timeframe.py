@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from app.models.enums import EnumFiltro, EnumParametro
 from app.models.filtro import Filtro
@@ -190,6 +191,50 @@ def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
     if enum_filtro in _MULTI_DAY_COMPARISON:
         return _barras_para_cubrir_dias(minutos, _MULTI_DAY_COMPARISON[enum_filtro])
     return 0
+
+
+_RESUMEN_DEL_DIA: set[EnumFiltro] = _DAY_ANCHORED | set(_MULTI_DAY_COMPARISON)
+_ET = ZoneInfo("America/New_York")
+_SESSION_OPEN_MINUTE_ET = 4 * 60
+_SESSION_MINUTES = 16 * 60
+
+
+def _barras_para_cubrir_sesion(minutos: int) -> int:
+    ahora = datetime.now(timezone.utc).astimezone(_ET)
+    desde_apertura = ahora.hour * 60 + ahora.minute - _SESSION_OPEN_MINUTE_ET
+    if not 0 <= desde_apertura < _SESSION_MINUTES:
+        desde_apertura = _SESSION_MINUTES
+    return desde_apertura // minutos + 5
+
+
+def necesita_resumen_del_dia(filtros: list[Filtro]) -> bool:
+    return any(f.enumFiltro in _RESUMEN_DEL_DIA for f in filtros)
+
+
+def usa_perfil_de_volumen(filtros: list[Filtro]) -> bool:
+    return any(f.enumFiltro == EnumFiltro.RELATIVE_VOLUME_SAME_TIME for f in filtros)
+
+
+def bars_historial_grupo(filtros: list[Filtro], minutos: int) -> int:
+    """Barras a pedir al suscribirse: lo de bars_necesarias_grupo, pero los
+    filtros del dia solo necesitan cubrir la sesion en curso (ET) -- el
+    resumen de la sesion se arma con esas barras y despues se descartan."""
+    requeridas = max(
+        (_barras_para_cubrir_sesion(minutos) if f.enumFiltro in _RESUMEN_DEL_DIA else bars_requeridas_filtro(f, minutos)
+         for f in filtros),
+        default=0,
+    )
+    return max(_MIN_BARS_FLOOR, minutos * 2, requeridas)
+
+
+def bars_buffer_grupo(filtros: list[Filtro], minutos: int) -> int:
+    """Barras que se guardan en memoria: sin contar los filtros del dia, que
+    leen su resumen de sesion y no las velas."""
+    requeridas = max(
+        (bars_requeridas_filtro(f, minutos) for f in filtros if f.enumFiltro not in _RESUMEN_DEL_DIA),
+        default=0,
+    )
+    return max(_MIN_BARS_FLOOR, minutos * 2, requeridas)
 
 
 def bars_necesarias_grupo(filtros: list[Filtro], minutos: int) -> int:

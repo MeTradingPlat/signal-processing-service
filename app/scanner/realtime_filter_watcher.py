@@ -6,7 +6,8 @@ from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
 from app.scanner.buffered_candle import BufferedCandle, candle_from_bar
 from app.scanner.realtime_candle_client import RealtimeCandleClient
-from app.scanner.timeframe import bars_necesarias_grupo, minutos_to_label
+from app.scanner.session_state import ProfileLoader, SessionState
+from app.scanner.timeframe import bars_buffer_grupo, bars_historial_grupo, minutos_to_label
 from app.strategies.base import MarketData
 from app.strategies.registry import get_strategy
 
@@ -64,7 +65,7 @@ class RealtimeFilterWatcher:
 
     def __init__(self, escaner: Escaner, ws_url: str,
                  publish_signal: Callable[[Escaner, str, list[SignalMatch]], None],
-                 client_factory=RealtimeCandleClient):
+                 client_factory=RealtimeCandleClient, profile_loader: ProfileLoader | None = None):
         self._escaner = escaner
         self._publish_signal = publish_signal
         self._grupos: list[tuple[int, str, list[Filtro]]] = []
@@ -74,6 +75,7 @@ class RealtimeFilterWatcher:
         self._stage: dict[str, int] = {}
         self._signaling: set[str] = set()
         self._capped_timeframes: set[str] = set()
+        self._state = SessionState(profile_loader)
         self._client = client_factory(ws_url, self._on_history, self._on_bar, self._bars_for)
 
     def configurar_grupos(self, grupos: dict[int, list[Filtro]]) -> None:
@@ -84,6 +86,7 @@ class RealtimeFilterWatcher:
             (minutos, minutos_to_label(minutos), filtros)
             for minutos, filtros in sorted(grupos.items(), key=lambda kv: -kv[0])
         ]
+        self._state.configurar(self._grupos)
 
     def actualizar_universo(self, filtrados: set[str]) -> None:
         """Se llama tras cada refresco de pre-filtros (aplicar_pre_filtros):
@@ -97,6 +100,7 @@ class RealtimeFilterWatcher:
         for symbol in filtrados - actuales:
             self._stage[symbol] = 0
         self._resuscribir()
+        self._state.cargar_perfiles(filtrados)
 
     def stop(self) -> None:
         self._client.stop()
@@ -119,18 +123,26 @@ class RealtimeFilterWatcher:
         self._client.update_subscriptions(keys)
         for key in [k for k in self._candles if k not in keys]:
             del self._candles[key]
+        self._state.podar(keys)
 
     def _bars_for(self, timeframe: str) -> int:
         j = self._indice_grupo(timeframe)
         if j is None:
             return _FALLBACK_BARS
         minutos, label, filtros = self._grupos[j]
-        needed = bars_necesarias_grupo(filtros, minutos) + 1
+        needed = bars_historial_grupo(filtros, minutos) + 1
         if needed > _MAX_REQUESTED_BARS and label not in self._capped_timeframes:
             self._capped_timeframes.add(label)
             logger.warning("RealtimeFilterWatcher: escaner=%d %s necesita %d barras, se acota a %d",
                            self._escaner.idEscaner, label, needed, _MAX_REQUESTED_BARS)
         return min(needed, _MAX_REQUESTED_BARS)
+
+    def _buffer_for(self, timeframe: str) -> int:
+        j = self._indice_grupo(timeframe)
+        if j is None:
+            return _FALLBACK_BARS
+        minutos, _, filtros = self._grupos[j]
+        return min(bars_buffer_grupo(filtros, minutos) + 1, _MAX_REQUESTED_BARS)
 
     def buffer_stats(self) -> tuple[int, int]:
         buffers = list(self._candles.values())
@@ -138,7 +150,9 @@ class RealtimeFilterWatcher:
 
     def _on_history(self, symbol: str, timeframe: str, bars: list[dict]) -> None:
         closed = [b for b in bars if b.get("closed")][-self._bars_for(timeframe):]
-        self._candles[(symbol, timeframe)] = [candle_from_bar(symbol, b) for b in closed]
+        candles = [candle_from_bar(symbol, b) for b in closed]
+        self._state.sembrar(symbol, timeframe, candles)
+        self._candles[(symbol, timeframe)] = candles[-self._buffer_for(timeframe):]
 
     def _indice_grupo(self, tf_label: str) -> int | None:
         for i, (_, label, _) in enumerate(self._grupos):
@@ -159,8 +173,10 @@ class RealtimeFilterWatcher:
 
         key = (symbol, timeframe)
         candles = self._candles.setdefault(key, [])
-        candles.append(candle_from_bar(symbol, bar))
-        del candles[:-self._bars_for(timeframe)]
+        candle = candle_from_bar(symbol, bar)
+        self._state.actualizar(symbol, timeframe, candle)
+        candles.append(candle)
+        del candles[:-self._buffer_for(timeframe)]
 
         j = self._indice_grupo(timeframe)
         if j is None:
@@ -175,7 +191,9 @@ class RealtimeFilterWatcher:
             return
 
         _, _, filtros = self._grupos[j]
-        data = MarketData(symbol=symbol, candles=candles, zona=self._zonas.get(symbol))
+        data = MarketData(symbol=symbol, candles=candles, zona=self._zonas.get(symbol),
+                          day=self._state.day(symbol, timeframe),
+                          volume_profile=self._state.profile(symbol, timeframe))
         pares = [(f, get_strategy(f)) for f in filtros]
         resultados = [estrategia.evaluate(data) for _f, estrategia in pares]
         paso = _todos_los_requeridos_pasan(filtros, resultados)

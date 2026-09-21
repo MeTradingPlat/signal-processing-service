@@ -4,7 +4,9 @@ from dataclasses import dataclass
 
 from app.models.filtro import Filtro
 from app.models.valor import ValorCondicional, ValorFloat, ValorInteger, ValorString
+from app.scanner.day_summary import DaySummary
 from app.scanner.marketdata_models import CandleResponse, FundamentalResponse, PriceSnapshot
+from app.scanner.volume_profile import VolumeProfile
 from app.strategies.condition import evaluate_condition
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,11 @@ class MarketData:
     # necesitan confluencia entre varias a la vez, ademas de las `candles`
     # de la temporalidad propia del grupo -- ver RangeConfluenceStrategy.
     velas_extra: dict[str, list[CandleResponse]] | None = None
+    # Resumen de la sesion (ET) y perfil de volumen acumulado que mantiene
+    # RealtimeFilterWatcher -- None en el camino batch, donde las
+    # estrategias siguen leyendo `candles` completas.
+    day: DaySummary | None = None
+    volume_profile: VolumeProfile | None = None
 
 
 class FilterStrategy(ABC):

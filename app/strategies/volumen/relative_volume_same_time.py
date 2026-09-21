@@ -14,6 +14,24 @@ class RelativeVolumeSameTimeStrategy(FilterStrategy):
     exactamente lo mismo que RELATIVE_VOLUME pese a su nombre."""
 
     def compute_value(self, data: MarketData) -> float | None:
+        if data.day is not None and data.volume_profile is not None:
+            return self._from_profile(data)
+        return self._from_candles(data)
+
+    def _from_profile(self, data: MarketData) -> float | None:
+        """Volumen acumulado del dia hasta esta vela contra el promedio
+        acumulado a esa misma hora en las ultimas sesiones (perfil que
+        calcula marketdata-service, ver /marketdata/volume-profile) -- la
+        definicion estandar de RVOL intradia, mas estable que comparar una
+        sola vela."""
+        if not data.candles:
+            return None
+        expected = data.volume_profile.expected_through(data.candles[-1].timestamp)
+        if not expected or expected <= 0:
+            return None
+        return (data.day.volume / expected) * 100.0
+
+    def _from_candles(self, data: MarketData) -> float | None:
         if not data.candles:
             return None
         current = data.candles[-1]

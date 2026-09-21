@@ -1,6 +1,7 @@
 from app.analysis.indicators import todays_candles
 from app.models.enums import EnumParametro
 from app.strategies.base import FilterStrategy, MarketData
+from app.strategies.day_view import day_extremes, first_candle_of_day, last_close
 
 
 class BearishBullishEngulfingStrategy(FilterStrategy):
@@ -58,11 +59,8 @@ class FirstCandleStrategy(FilterStrategy):
     para cualquiera de los dos, sin filtrar por la seleccion real)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = todays_candles(data.candles)
-        if not todays:
-            return None
-        first = todays[0]
-        if first.close is None or first.open is None:
+        first = first_candle_of_day(data)
+        if first is None or first.close is None or first.open is None:
             return None
         tipo = self._param_str(EnumParametro.TIPO_VELA_FIRTS_CANDLE, "ALCISTA")
         if first.close > first.open:
@@ -80,20 +78,17 @@ class HighLowOfDayStrategy(FilterStrategy):
     minimo)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = todays_candles(data.candles)
-        if not todays:
+        extremes = day_extremes(data)
+        price = last_close(data)
+        if extremes is None or price is None:
             return None
-        if any(c.high is None or c.low is None for c in todays) or todays[-1].close is None:
-            return None
-        day_high = max(c.high for c in todays)
-        day_low = min(c.low for c in todays)
+        day_high, day_low = extremes
         if day_high <= day_low:
             # Un solo candle del dia (o todos al mismo precio) no tiene rango:
             # devolver 0.0 era "distancia al minimo = 0%" y pasaba cualquier
             # condicion MENOR_QUE -- los warrants que negocian 1 vela al dia
             # senialaban siempre (confirmado en vivo 2026-08-24).
             return None
-        price = todays[-1].close
         opcion = self._param_str(EnumParametro.OPCION_EXTREMO_HIGH_LOW_DAY, "HIGH")
         if opcion == "LOW":
             return ((price - day_low) / (day_high - day_low)) * 100.0
@@ -183,13 +178,10 @@ class OpeningRangeBreakdownStrategy(FilterStrategy):
     arrancaba en la apertura del dia (podia ser de ayer)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = todays_candles(data.candles)
-        if not todays:
+        first = first_candle_of_day(data)
+        price = last_close(data)
+        if first is None or first.low is None or price is None:
             return None
-        first = todays[0]
-        if first.low is None or todays[-1].close is None:
-            return None
-        price = todays[-1].close
         return 1.0 if price < first.low and first.low > 0 else 0.0
 
 
@@ -199,13 +191,10 @@ class OpeningRangeBreakoutStrategy(FilterStrategy):
     OpeningRangeBreakdownStrategy."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        todays = todays_candles(data.candles)
-        if not todays:
+        first = first_candle_of_day(data)
+        price = last_close(data)
+        if first is None or first.high is None or price is None:
             return None
-        first = todays[0]
-        if first.high is None or todays[-1].close is None:
-            return None
-        price = todays[-1].close
         return 1.0 if price > first.high and first.high > 0 else 0.0
 
 

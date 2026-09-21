@@ -61,6 +61,22 @@ class RealtimeCandleClient:
             self._desired = set(keys)
         self._sync_subscriptions()
 
+    def change_subscriptions(self, add: set[tuple[str, str]], remove: set[tuple[str, str]]) -> None:
+        """Cambio puntual (un simbolo que sube o baja de grupo): a diferencia
+        de update_subscriptions no recorre el conjunto completo, asi que su
+        costo no crece con el tamaño del universo."""
+        with self._lock:
+            self._desired |= add
+            self._desired -= remove
+            if self._ws is None:
+                return
+            to_add = add - self._subscribed
+            to_remove = remove & self._subscribed
+            self._subscribed |= to_add
+            self._subscribed -= to_remove
+        self._send_batched("subscribe", to_add)
+        self._send_batched("unsubscribe", to_remove)
+
     def stop(self) -> None:
         self._stop = True
         if self._ws is not None:

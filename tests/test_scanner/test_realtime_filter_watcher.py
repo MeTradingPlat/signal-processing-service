@@ -23,6 +23,10 @@ class _FakeCandleClient:
     def update_subscriptions(self, keys):
         self.subscriptions = keys
 
+    def change_subscriptions(self, add, remove):
+        self.subscriptions = (self.subscriptions | add) - remove
+        self.cambios = getattr(self, "cambios", 0) + 1
+
     def stop(self):
         self.stopped = True
 

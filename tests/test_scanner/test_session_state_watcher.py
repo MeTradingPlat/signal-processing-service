@@ -219,3 +219,66 @@ def test_un_error_del_cargador_se_reintenta_al_minuto(monkeypatch):
     watcher.actualizar_universo({"AAPL"})
 
     assert len(intentos) == 2
+
+
+def test_un_cambio_de_grupo_ajusta_solo_las_suscripciones_de_ese_simbolo():
+    watcher = RealtimeFilterWatcher(
+        _escaner(), "ws://x/ws/candles", publish_signal=lambda *a: None, client_factory=_FakeCandleClient)
+    watcher.configurar_grupos({60: [Filtro(enumFiltro=EnumFiltro.PIVOTS)], 1: [Filtro(enumFiltro=EnumFiltro.PIVOTS)]})
+    watcher.actualizar_universo({"AAPL", "MSFT"})
+    completas = watcher._client.update_subscriptions
+    llamadas = []
+    watcher._client.update_subscriptions = lambda keys: (llamadas.append(keys), completas(keys))
+
+    watcher._stage["AAPL"] = 1
+    watcher._resuscribir_symbol("AAPL")
+
+    assert llamadas == []
+    assert watcher._client.subscriptions == {("AAPL", "H1"), ("AAPL", "M1"), ("MSFT", "H1")}
+    assert watcher._client.cambios == 1
+
+
+def test_degradar_un_simbolo_quita_solo_sus_suscripciones_finas_y_su_buffer():
+    watcher = RealtimeFilterWatcher(
+        _escaner(), "ws://x/ws/candles", publish_signal=lambda *a: None, client_factory=_FakeCandleClient)
+    watcher.configurar_grupos({60: [Filtro(enumFiltro=EnumFiltro.PIVOTS)], 1: [Filtro(enumFiltro=EnumFiltro.PIVOTS)]})
+    watcher.actualizar_universo({"AAPL", "MSFT"})
+    watcher._stage["AAPL"] = 1
+    watcher._resuscribir_symbol("AAPL")
+    watcher._on_history("AAPL", "M1", [_bar_dict(0)])
+
+    watcher._degradar("AAPL", 0)
+
+    assert watcher._client.subscriptions == {("AAPL", "H1"), ("MSFT", "H1")}
+    assert ("AAPL", "M1") not in watcher._candles
+
+
+def test_barras_y_ciclos_concurrentes_no_rompen_el_estado_del_watcher():
+    import threading
+
+    watcher = RealtimeFilterWatcher(
+        _escaner(), "ws://x/ws/candles", publish_signal=lambda *a: None, client_factory=_FakeCandleClient)
+    watcher.configurar_grupos({60: [Filtro(enumFiltro=EnumFiltro.PIVOTS)], 1: [Filtro(enumFiltro=EnumFiltro.PIVOTS)]})
+    universo = {f"S{i}" for i in range(300)}
+    watcher.actualizar_universo(universo)
+    errores, parar = [], threading.Event()
+
+    def barras():
+        k = 0
+        while not parar.is_set():
+            for i in range(300):
+                for tf in ("H1", "M1"):
+                    try:
+                        watcher._on_bar(f"S{i}", tf, _bar_dict(k, high=1.0 + (i + k) % 7))
+                    except Exception as e:
+                        errores.append(repr(e))
+            k += 1
+
+    hilo = threading.Thread(target=barras)
+    hilo.start()
+    for i in range(60):
+        watcher.actualizar_universo(universo if i % 2 == 0 else set(list(universo)[:250]))
+    parar.set()
+    hilo.join()
+
+    assert errores == []

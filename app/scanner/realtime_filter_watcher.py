@@ -1,4 +1,6 @@
+import functools
 import logging
+import threading
 from typing import Callable
 
 from app.models.escaner import Escaner
@@ -15,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_BARS = 200
 _MAX_REQUESTED_BARS = 2000
+
+
+def _locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def _todos_los_requeridos_pasan(filtros: list[Filtro], resultados: list[bool]) -> bool:
@@ -75,6 +85,8 @@ class RealtimeFilterWatcher:
         self._stage: dict[str, int] = {}
         self._signaling: set[str] = set()
         self._capped_timeframes: set[str] = set()
+        self._keys_por_symbol: dict[str, set[tuple[str, str]]] = {}
+        self._lock = threading.RLock()
         self._state = SessionState(profile_loader)
         self._client = client_factory(ws_url, self._on_history, self._on_bar, self._bars_for)
 
@@ -88,6 +100,7 @@ class RealtimeFilterWatcher:
         ]
         self._state.configurar(self._grupos)
 
+    @_locked
     def actualizar_universo(self, filtrados: set[str]) -> None:
         """Se llama tras cada refresco de pre-filtros (aplicar_pre_filtros):
         agrega simbolos nuevos al primer grupo (el mas grueso), y resetea
@@ -111,19 +124,35 @@ class RealtimeFilterWatcher:
         self._zonas.pop(symbol, None)
         self._signaling.discard(symbol)
 
+    def _keys_de(self, symbol: str) -> set[tuple[str, str]]:
+        # Suscripto a su propio grupo (stage) Y a todos los mas gruesos que
+        # ya paso (0..stage-1) -- estos ultimos siguen vigilados para poder
+        # degradar al simbolo si una vela gruesa que vuelve a cerrar deja de
+        # calificar.
+        stage = self._stage.get(symbol)
+        if stage is None:
+            return set()
+        return {(symbol, self._grupos[i][1]) for i in range(min(stage, len(self._grupos) - 1) + 1)}
+
     def _resuscribir(self) -> None:
-        keys: set[tuple[str, str]] = set()
-        for symbol, stage in self._stage.items():
-            # Suscripto a su propio grupo (stage) Y a todos los mas gruesos
-            # que ya paso (0..stage-1) -- estos ultimos siguen vigilados
-            # para poder degradar al simbolo si una vela gruesa que vuelve a
-            # cerrar deja de calificar.
-            for i in range(min(stage, len(self._grupos) - 1) + 1):
-                keys.add((symbol, self._grupos[i][1]))
+        self._keys_por_symbol = {symbol: self._keys_de(symbol) for symbol in self._stage}
+        keys: set[tuple[str, str]] = set().union(*self._keys_por_symbol.values())
         self._client.update_subscriptions(keys)
         for key in [k for k in self._candles if k not in keys]:
             del self._candles[key]
         self._state.podar(keys)
+
+    def _resuscribir_symbol(self, symbol: str) -> None:
+        nuevas = self._keys_de(symbol)
+        actuales = self._keys_por_symbol.get(symbol, set())
+        agregar, quitar = nuevas - actuales, actuales - nuevas
+        self._keys_por_symbol[symbol] = nuevas
+        if not agregar and not quitar:
+            return
+        self._client.change_subscriptions(agregar, quitar)
+        for key in quitar:
+            self._candles.pop(key, None)
+        self._state.olvidar(quitar)
 
     def _bars_for(self, timeframe: str) -> int:
         j = self._indice_grupo(timeframe)
@@ -148,6 +177,7 @@ class RealtimeFilterWatcher:
         buffers = list(self._candles.values())
         return len(buffers), sum(len(b) for b in buffers)
 
+    @_locked
     def _on_history(self, symbol: str, timeframe: str, bars: list[dict]) -> None:
         closed = [b for b in bars if b.get("closed")][-self._bars_for(timeframe):]
         candles = [candle_from_bar(symbol, b) for b in closed]
@@ -160,6 +190,7 @@ class RealtimeFilterWatcher:
                 return i
         return None
 
+    @_locked
     def _on_bar(self, symbol: str, timeframe: str, bar: dict) -> None:
         # /ws/candles manda un mensaje por CADA tick de la vela en formacion
         # (closed=false) y recien uno solo, al cerrar el periodo real,
@@ -217,7 +248,7 @@ class RealtimeFilterWatcher:
             return
         if j == stage:
             self._stage[symbol] = j + 1
-            self._resuscribir()
+            self._resuscribir_symbol(symbol)
 
     def _degradar(self, symbol: str, grupo_index: int) -> None:
         """El simbolo dejo de calificar en el grupo `grupo_index` -- vuelve
@@ -233,7 +264,7 @@ class RealtimeFilterWatcher:
                 del matches_por_grupo[i]
         self._zonas.pop(symbol, None)
         self._signaling.discard(symbol)
-        self._resuscribir()
+        self._resuscribir_symbol(symbol)
 
     def _completar_cadena(self, symbol: str) -> None:
         """El simbolo paso TODOS los grupos, del mas grueso al mas fino --

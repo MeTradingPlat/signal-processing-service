@@ -61,6 +61,10 @@ class SessionState:
     def profile(self, symbol: str, timeframe: str) -> VolumeProfile | None:
         return self._profiles.get((symbol, timeframe))
 
+    def olvidar(self, keys: set[tuple[str, str]]) -> None:
+        for key in keys:
+            self._days.pop(key, None)
+
     def podar(self, keys: set[tuple[str, str]]) -> None:
         for key in [k for k in self._days if k not in keys]:
             del self._days[key]

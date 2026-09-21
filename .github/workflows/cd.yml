@@ -45,6 +45,9 @@ jobs:
           echo "--- DISK SPACE CHECK ---"
           df -h
           echo "--- CLEANING SERVICE METADATA ---"
+          mkdir -p "$HOME/deploy-logs"
+          docker logs --tail 5000 signal-processing-service > "$HOME/deploy-logs/signal-processing-service-$(date -u +%Y%m%dT%H%M%SZ).log" 2>&1 || true
+          find "$HOME/deploy-logs" -name 'signal-processing-service-*.log' -mtime +14 -delete 2>/dev/null || true
           docker rm -f signal-processing-service || true
           docker image rm -f virtud142/metradingplat_signal_processing_service:latest || true
 

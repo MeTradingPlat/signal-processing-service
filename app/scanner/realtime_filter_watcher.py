@@ -201,6 +201,9 @@ class RealtimeFilterWatcher:
         # inicial (filtra por "closed" ahi tambien).
         if not bar.get("closed"):
             return
+        if bar.get("corrected"):
+            self._aplicar_correccion(symbol, timeframe, bar)
+            return
 
         key = (symbol, timeframe)
         candles = self._candles.setdefault(key, [])
@@ -249,6 +252,22 @@ class RealtimeFilterWatcher:
         if j == stage:
             self._stage[symbol] = j + 1
             self._resuscribir_symbol(symbol)
+
+    def _aplicar_correccion(self, symbol: str, timeframe: str, bar: dict) -> None:
+        """marketdata reenvia una vela ya cerrada con datos corregidos (un tick
+        tardio de dxFeed): se reemplaza la que ya estaba en el buffer, con el
+        mismo timestamp, y se ajusta el resumen del dia. No se reevalua ningun
+        filtro -- la señal que ya se decidio no se revierte, y la siguiente
+        vela se evalua con el dato corregido."""
+        candles = self._candles.get((symbol, timeframe))
+        if not candles:
+            return
+        corregida = candle_from_bar(symbol, bar)
+        for i in range(len(candles) - 1, -1, -1):
+            if candles[i].timestamp == corregida.timestamp:
+                anterior, candles[i] = candles[i], corregida
+                self._state.corregir(symbol, timeframe, anterior, corregida)
+                return
 
     def _degradar(self, symbol: str, grupo_index: int) -> None:
         """El simbolo dejo de calificar en el grupo `grupo_index` -- vuelve

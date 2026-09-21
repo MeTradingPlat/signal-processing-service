@@ -6,7 +6,7 @@ from typing import Callable
 from app.models.filtro import Filtro
 from app.scanner.buffered_candle import BufferedCandle
 from app.scanner.day_summary import DaySummary, apply_bar
-from app.scanner.session_clock import today_et
+from app.scanner.session_clock import session_slot, today_et
 from app.scanner.timeframe import necesita_resumen_del_dia, usa_perfil_de_volumen
 from app.scanner.volume_profile import VolumeProfile
 
@@ -54,6 +54,19 @@ class SessionState:
         summary = apply_bar(self._days.get((symbol, timeframe)), candle)
         if summary is not None:
             self._days[(symbol, timeframe)] = summary
+
+    def corregir(self, symbol: str, timeframe: str, anterior: BufferedCandle, corregida: BufferedCandle) -> None:
+        resumen = self._days.get((symbol, timeframe))
+        slot = session_slot(corregida.timestamp)
+        if resumen is None or slot is None or slot[0] != resumen.session:
+            return
+        resumen.volume += (corregida.volume or 0) - (anterior.volume or 0)
+        if corregida.high is not None and (resumen.high is None or corregida.high > resumen.high):
+            resumen.high = corregida.high
+        if corregida.low is not None and (resumen.low is None or corregida.low < resumen.low):
+            resumen.low = corregida.low
+        if resumen.first.timestamp == corregida.timestamp:
+            resumen.first = corregida
 
     def day(self, symbol: str, timeframe: str) -> DaySummary | None:
         return self._days.get((symbol, timeframe))

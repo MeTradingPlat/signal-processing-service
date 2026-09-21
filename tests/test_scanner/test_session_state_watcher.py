@@ -282,3 +282,47 @@ def test_barras_y_ciclos_concurrentes_no_rompen_el_estado_del_watcher():
     hilo.join()
 
     assert errores == []
+
+
+def test_una_correccion_reemplaza_la_vela_del_buffer_y_ajusta_el_resumen_del_dia():
+    watcher = _watcher(Filtro(enumFiltro=EnumFiltro.HIGH_LOW_OF_DAY))
+    watcher._on_history("AAPL", "M1", [_bar_dict(0, high=5.0, volume=100), _bar_dict(1, high=6.0, volume=30)])
+
+    corregida = _bar_dict(0, high=7.0, volume=120)
+    corregida["corrected"] = True
+    watcher._on_bar("AAPL", "M1", corregida)
+
+    buffer = watcher._candles[("AAPL", "M1")]
+    resumen = watcher._state.day("AAPL", "M1")
+    assert len(buffer) == 2 and buffer[0].volume == 120 and buffer[0].high == 7.0
+    assert (resumen.volume, resumen.high) == (150, 7.0)
+    assert resumen.first.volume == 120
+
+
+def test_una_correccion_no_agrega_velas_ni_reevalua_filtros():
+    publicadas = []
+    watcher = RealtimeFilterWatcher(
+        _escaner(), "ws://x/ws/candles", publish_signal=lambda *a: publicadas.append(a),
+        client_factory=_FakeCandleClient)
+    watcher.configurar_grupos({1: [Filtro(enumFiltro=EnumFiltro.PIVOTS)]})
+    watcher.actualizar_universo({"AAPL"})
+    watcher._on_history("AAPL", "M1", [_bar_dict(0)])
+
+    corregida = _bar_dict(0, volume=999)
+    corregida["corrected"] = True
+    watcher._on_bar("AAPL", "M1", corregida)
+
+    assert len(watcher._candles[("AAPL", "M1")]) == 1
+    assert publicadas == []
+
+
+def test_una_correccion_de_una_vela_que_ya_salio_del_buffer_se_ignora():
+    watcher = _watcher(Filtro(enumFiltro=EnumFiltro.HIGH_LOW_OF_DAY))
+    watcher._on_history("AAPL", "M1", [_bar_dict(5, volume=10)])
+
+    corregida = _bar_dict(0, volume=999)
+    corregida["corrected"] = True
+    watcher._on_bar("AAPL", "M1", corregida)
+
+    assert [c.volume for c in watcher._candles[("AAPL", "M1")]] == [10]
+    assert watcher._state.day("AAPL", "M1").volume == 10

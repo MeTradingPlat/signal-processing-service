@@ -28,7 +28,8 @@ class LogServiceClient:
             except (httpx.TransportError, httpx.HTTPStatusError) as e:
                 if attempt == _ATTEMPTS or not _is_transient(e):
                     raise
-                logger.warning("signaled-today intento %d/%d fallo (%s), reintentando", attempt, _ATTEMPTS, e)
+                logger.warning("signaled-today intento %d/%d fallo (%s: %s), reintentando", attempt, _ATTEMPTS,
+                               type(e).__name__, e)
                 self._sleep(_RETRY_PAUSE_SECONDS)
 
 

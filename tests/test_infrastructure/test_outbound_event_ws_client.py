@@ -88,9 +88,9 @@ def test_messages_sent_while_flushing_backlog_do_not_jump_the_queue():
     assert [json.loads(m)["n"] for m in client._ws.sent] == [0, 1]
 
 
-def test_queue_is_bounded_and_drops_the_oldest(monkeypatch):
-    monkeypatch.setattr(client_module, "_MAX_PENDING_MESSAGES", 3)
+def test_queue_is_bounded_and_drops_the_oldest():
     client = _client()
+    client.set_max_pending(3)
 
     for i in range(5):
         client.send({"n": i})
@@ -98,3 +98,22 @@ def test_queue_is_bounded_and_drops_the_oldest(monkeypatch):
     _connect(client, ws)
 
     assert [json.loads(m)["n"] for m in ws.sent] == [2, 3, 4]
+
+
+def test_set_max_pending_changes_the_cap_used_by_new_enqueues():
+    client = _client()
+    client.set_max_pending(2)
+
+    for i in range(5):
+        client.send({"n": i})
+
+    assert client.pending_count() == 2
+
+
+def test_default_max_pending_is_the_module_constant():
+    client = _client()
+
+    for i in range(client_module._MAX_PENDING_MESSAGES + 5):
+        client.send({"n": i})
+
+    assert client.pending_count() == client_module._MAX_PENDING_MESSAGES

@@ -3,7 +3,9 @@ import logging
 from datetime import datetime, timezone
 
 from app.config import settings
+from app.infrastructure.output.max_pending_from_universe import start_max_pending_from_universe
 from app.infrastructure.output.outbound_event_ws_client import OutboundEventWebSocketClient
+from app.scanner.marketdata_client import MarketdataClient
 from app.scanner.timeframe import extraer_timeframe_minutos, minutos_to_label
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,9 @@ _notification_service_client = OutboundEventWebSocketClient(
     _ws_url(settings.notification_service_url, "/ws/internal/notificaciones/estado-escaner"), "notification-service")
 _scanner_management_client = OutboundEventWebSocketClient(
     _ws_url(settings.scanner_management_url, "/ws/internal/estado-escaner"), "scanner-management-service")
+
+start_max_pending_from_universe(
+    [_log_service_client, _notification_service_client, _scanner_management_client], MarketdataClient)
 
 
 def publish_signals(scanner_id: int, scanner_name: str, signals: dict, nuevos: set):

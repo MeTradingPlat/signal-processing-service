@@ -14,7 +14,7 @@ _MAX_PENDING_MESSAGES = 10_000
 
 
 class OutboundEventWebSocketClient:
-    def __init__(self, ws_url: str, etiqueta: str, start: bool = True):
+    def __init__(self, ws_url: str, etiqueta: str, start: bool = True, max_pending: int = _MAX_PENDING_MESSAGES):
         self._ws_url = ws_url
         self._etiqueta = etiqueta
         self._ws = None
@@ -22,12 +22,17 @@ class OutboundEventWebSocketClient:
         self._lock = threading.Lock()
         self._pending: deque[str] = deque()
         self._dropped = 0
+        self._max_pending = max_pending
         self._reconnect_attempts = 0
         self._stop = False
         self._thread = threading.Thread(target=self._run_forever, daemon=True,
                                         name=f"ws-out-{etiqueta}")
         if start:
             self._thread.start()
+
+    def set_max_pending(self, max_pending: int) -> None:
+        with self._lock:
+            self._max_pending = max_pending
 
     def send(self, payload: dict) -> None:
         message = json.dumps(payload, default=str)
@@ -54,7 +59,7 @@ class OutboundEventWebSocketClient:
             return False
 
     def _enqueue(self, message: str) -> None:
-        if len(self._pending) >= _MAX_PENDING_MESSAGES:
+        if len(self._pending) >= self._max_pending:
             self._pending.popleft()
             self._dropped += 1
             if self._dropped % 1000 == 1:

@@ -101,12 +101,15 @@ class NewCandleHighLowStrategy(FilterStrategy):
     la seleccion del usuario)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        # Minimo 3 velas (2 previas), igual que BREAK_OVER: "nuevo maximo de
-        # N velas" contra una sola vela previa es ruido en series degeneradas
-        # (warrants con 1 vela al dia).
-        if not data.candles or len(data.candles) < 3:
+        # "Nuevo maximo/minimo de las ultimas N velas": N lo elige el usuario
+        # (por defecto 20, el valor estandar del canal de Donchian). Antes se
+        # comparaba contra TODAS las velas del buffer (>= 150, y mas si otro
+        # filtro del grupo pedia mas), asi que el mismo filtro daba resultados
+        # distintos segun con que otros filtros compartiera temporalidad.
+        n = max(self._param_int(EnumParametro.NUMERO_VELAS_NEW_CANDLE, 20), 2)
+        if not data.candles or len(data.candles) < n + 1:
             return None
-        prior = data.candles[:-1]
+        prior = data.candles[-(n + 1):-1]
         curr = data.candles[-1]
         if any(c.high is None or c.low is None for c in prior) or curr.high is None or curr.low is None:
             return None
@@ -152,13 +155,14 @@ class BreakOverRecentHighsLowsStrategy(FilterStrategy):
     dos, sin filtrar por la seleccion del usuario)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        # Minimo 3 velas (2 previas): con solo 2 (la actual y una previa)
-        # "romper el maximo reciente" es comparar contra UN solo candle, y
-        # las series degeneradas (warrants con 1 vela al dia) lo pasaban
-        # con un tick de fracciones de centavo (confirmado en vivo 2026-08-24).
-        if not data.candles or len(data.candles) < 3:
+        # Rompe el maximo/minimo de las ultimas N velas (N configurable, por
+        # defecto 20). Exigir N previas evita las series degeneradas
+        # (warrants con 1 vela al dia, confirmado en vivo 2026-08-24) que
+        # rompian "el maximo reciente" contra una sola vela.
+        n = max(self._param_int(EnumParametro.NUMERO_VELAS_BREAK_OVER, 20), 2)
+        if not data.candles or len(data.candles) < n + 1:
             return None
-        prior = data.candles[:-1]
+        prior = data.candles[-(n + 1):-1]
         curr = data.candles[-1]
         if any(c.high is None or c.low is None for c in prior) or curr.close is None:
             return None

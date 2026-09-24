@@ -78,7 +78,9 @@ class BackToEMAAlertStrategy(FilterStrategy):
 
 
 class ThroughEMAVWAPAlertStrategy(FilterStrategy):
-    """Price actually crossing through EMA/VWAP this bar -- el cierre previo
+    """Price actually crossing through EMA/VWAP this bar EN LA DIRECCION
+    ELEGIDA (ABOVE = cruza hacia arriba, BELOW = hacia abajo; antes el
+    parametro se ignoraba y contaba cualquier cruce) -- el cierre previo
     estaba a un lado de la linea y el actual quedo del otro. Antes solo
     calculaba la distancia actual (identica a DistanceFromEMA), sin comparar
     contra la vela anterior, asi que nunca detectaba un cruce real, solo
@@ -100,9 +102,11 @@ class ThroughEMAVWAPAlertStrategy(FilterStrategy):
         if ref is None or ref <= 0:
             return None
         prev_close, curr_close = closes[-2], closes[-1]
+        direccion = self._param_str(EnumParametro.THROUGH_EMA_VWAP_DIRECCION_ROMPIMIENTO, "ABOVE")
         crossed_up = prev_close <= ref < curr_close
         crossed_down = prev_close >= ref > curr_close
-        if not (crossed_up or crossed_down):
+        hit = crossed_down if direccion == "BELOW" else crossed_up
+        if not hit:
             return 0.0
         return ((curr_close / ref) - 1.0) * 100.0
 

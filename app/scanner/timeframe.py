@@ -163,6 +163,10 @@ def bars_requeridas_filtro(filtro: Filtro, minutos: int) -> int:
         return _leer_periodo(filtro, EnumParametro.NUMERO_VELAS_CONSECUTIVAS, 3) + 1
     if enum_filtro == EnumFiltro.VOLUME_SPIKE:
         return _leer_periodo(filtro, EnumParametro.NUMERO_VELAS_VOLUME_SPIKE, 5) + 1
+    if enum_filtro == EnumFiltro.NEW_CANDLE_HIGH_LOW:
+        return _leer_periodo(filtro, EnumParametro.NUMERO_VELAS_NEW_CANDLE, 20) + 1
+    if enum_filtro == EnumFiltro.BREAK_OVER_RECENT_HIGHS_LOWS:
+        return _leer_periodo(filtro, EnumParametro.NUMERO_VELAS_BREAK_OVER, 20) + 1
     if enum_filtro == EnumFiltro.CROSSING_ABOVE_BELOW:
         return _leer_periodo(filtro, EnumParametro.PERIODO_EMA_CROSSING_ABOVE_BELOW, 9) + 1
     # Estrategia "Liquidity Inducement": lookbacks configurables por el

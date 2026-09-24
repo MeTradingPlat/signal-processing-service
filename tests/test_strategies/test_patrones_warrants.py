@@ -56,6 +56,10 @@ def test_break_over_dispara_con_serie_real():
     ]
     s = _strategy(BreakOverRecentHighsLowsStrategy,
                   **{EnumParametro.OPCION_EXTREMO_BREAK_OVER: "HIGH"})
+    from app.models.parametro import Parametro
+    from app.models.valor import ValorInteger
+    s.filtro.parametros.append(
+        Parametro(enumParametro=EnumParametro.NUMERO_VELAS_BREAK_OVER, objValorSeleccionado=ValorInteger(valor=2)))
     assert s.compute_value(MarketData(symbol="KRAQW", candles=candles)) == 1.0
 
 

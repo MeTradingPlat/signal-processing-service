@@ -7,6 +7,7 @@ from app.models.escaner import Escaner
 from app.models.filtro import Filtro
 from app.models.signal_match import SignalMatch
 from app.scanner.buffered_candle import BufferedCandle, candle_from_bar
+from app.scanner.candle_columns import CandleColumns
 from app.scanner.realtime_candle_client import RealtimeCandleClient
 from app.scanner.session_state import ProfileLoader, SessionState
 from app.scanner.timeframe import bars_buffer_grupo, bars_historial_grupo, minutos_to_label
@@ -79,7 +80,7 @@ class RealtimeFilterWatcher:
         self._escaner = escaner
         self._publish_signal = publish_signal
         self._grupos: list[tuple[int, str, list[Filtro]]] = []
-        self._candles: dict[tuple[str, str], list[BufferedCandle]] = {}
+        self._candles: dict[tuple[str, str], CandleColumns] = {}
         self._zonas: dict[str, tuple[float, float]] = {}
         self._group_matches: dict[str, dict[int, list[SignalMatch]]] = {}
         self._stage: dict[str, int] = {}
@@ -184,7 +185,7 @@ class RealtimeFilterWatcher:
         closed = [b for b in bars if b.get("closed")][-self._bars_for(timeframe):]
         candles = [candle_from_bar(symbol, b) for b in closed]
         self._state.sembrar(symbol, timeframe, candles)
-        self._candles[(symbol, timeframe)] = candles[-self._buffer_for(timeframe):]
+        self._candles[(symbol, timeframe)] = CandleColumns(symbol, candles[-self._buffer_for(timeframe):])
 
     def _indice_grupo(self, tf_label: str) -> int | None:
         for i, (_, label, _) in enumerate(self._grupos):
@@ -208,12 +209,12 @@ class RealtimeFilterWatcher:
             return
 
         key = (symbol, timeframe)
-        candles = self._candles.setdefault(key, [])
+        candles = self._candles.setdefault(key, CandleColumns(symbol))
         candle = candle_from_bar(symbol, bar)
         self._state.actualizar(symbol, timeframe, candle)
         candles.append(candle)
-        del candles[:-self._buffer_for(timeframe)]
-        self._evaluar(symbol, timeframe, candles)
+        candles.trim(self._buffer_for(timeframe))
+        self._evaluar(symbol, timeframe, candles.materialize())
 
     def _pares_de(self, j: int, filtros: list[Filtro]) -> list:
         pares = self._pares_por_grupo.get(j)
@@ -279,13 +280,13 @@ class RealtimeFilterWatcher:
         if not candles:
             return
         corregida = candle_from_bar(symbol, bar)
-        for i in range(len(candles) - 1, -1, -1):
-            if candles[i].timestamp == corregida.timestamp:
-                anterior, candles[i] = candles[i], corregida
-                self._state.corregir(symbol, timeframe, anterior, corregida)
-                if i == len(candles) - 1:
-                    self._evaluar(symbol, timeframe, candles)
-                return
+        i = candles.index_of(corregida.timestamp)
+        if i is None:
+            return
+        anterior = candles.replace(i, corregida)
+        self._state.corregir(symbol, timeframe, anterior, corregida)
+        if i == len(candles) - 1:
+            self._evaluar(symbol, timeframe, candles.materialize())
 
     def _degradar(self, symbol: str, grupo_index: int) -> None:
         """El simbolo dejo de calificar en el grupo `grupo_index` -- vuelve

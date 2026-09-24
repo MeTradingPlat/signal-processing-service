@@ -1,6 +1,7 @@
 import functools
 import logging
 import threading
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from app.models.escaner import Escaner
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_BARS = 200
 _MAX_REQUESTED_BARS = 2000
+_DAY_MINUTES = 1440
 
 
 def _locked(method):
@@ -81,6 +83,7 @@ class RealtimeFilterWatcher:
         self._publish_signal = publish_signal
         self._grupos: list[tuple[int, str, list[Filtro]]] = []
         self._candles: dict[tuple[str, str], CandleColumns] = {}
+        self._last_evaluated: dict[tuple[str, str], datetime] = {}
         self._zonas: dict[str, tuple[float, float]] = {}
         self._group_matches: dict[str, dict[int, list[SignalMatch]]] = {}
         self._stage: dict[str, int] = {}
@@ -143,6 +146,7 @@ class RealtimeFilterWatcher:
         self._client.update_subscriptions(keys)
         for key in [k for k in self._candles if k not in keys]:
             del self._candles[key]
+            self._last_evaluated.pop(key, None)
         self._state.podar(keys)
 
     def _resuscribir_symbol(self, symbol: str) -> None:
@@ -155,6 +159,7 @@ class RealtimeFilterWatcher:
         self._client.change_subscriptions(agregar, quitar)
         for key in quitar:
             self._candles.pop(key, None)
+            self._last_evaluated.pop(key, None)
         self._state.olvidar(quitar)
 
     def _bars_for(self, timeframe: str) -> int:
@@ -186,6 +191,24 @@ class RealtimeFilterWatcher:
         candles = [candle_from_bar(symbol, b) for b in closed]
         self._state.sembrar(symbol, timeframe, candles)
         self._candles[(symbol, timeframe)] = CandleColumns(symbol, candles[-self._buffer_for(timeframe):])
+        if candles:
+            self._evaluar_ultima_vela_del_historial(symbol, timeframe, candles)
+
+    def _evaluar_ultima_vela_del_historial(self, symbol: str, timeframe: str, candles: list[BufferedCandle]) -> None:
+        ultima = candles[-1]
+        key = (symbol, timeframe)
+        if self._last_evaluated.get(key) == ultima.timestamp or self._es_vela_vieja(timeframe, ultima):
+            return
+        self._last_evaluated[key] = ultima.timestamp
+        self._evaluar(symbol, timeframe, candles)
+
+    def _es_vela_vieja(self, timeframe: str, candle: BufferedCandle) -> bool:
+        j = self._indice_grupo(timeframe)
+        if j is None:
+            return True
+        minutos = self._grupos[j][0]
+        limite = timedelta(days=4) if minutos >= _DAY_MINUTES else timedelta(minutes=max(20, minutos * 2))
+        return datetime.now(timezone.utc) - candle.timestamp - timedelta(minutes=minutos) > limite
 
     def _indice_grupo(self, tf_label: str) -> int | None:
         for i, (_, label, _) in enumerate(self._grupos):
@@ -214,6 +237,7 @@ class RealtimeFilterWatcher:
         self._state.actualizar(symbol, timeframe, candle)
         candles.append(candle)
         candles.trim(self._buffer_for(timeframe))
+        self._last_evaluated[key] = candle.timestamp
         self._evaluar(symbol, timeframe, candles.materialize())
 
     def _pares_de(self, j: int, filtros: list[Filtro]) -> list:

@@ -127,9 +127,12 @@ class PercentagePullbackHighsLowsStrategy(FilterStrategy):
     calculaba el retroceso desde el HIGH)."""
 
     def compute_value(self, data: MarketData) -> float | None:
-        if not data.candles or len(data.candles) < 5:
+        # Ventana de N velas configurable (por defecto 5, lo que antes estaba
+        # fijo y oculto en el codigo).
+        n = max(self._param_int(EnumParametro.NUMERO_VELAS_PULLBACK, 5), 2)
+        if not data.candles or len(data.candles) < n:
             return None
-        recent = data.candles[-5:]
+        recent = data.candles[-n:]
         price = data.candles[-1].close
         if price is None:
             return None

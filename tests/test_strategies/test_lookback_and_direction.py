@@ -95,3 +95,43 @@ def test_ema_cross_only_reports_the_chosen_direction():
     assert _through("ABOVE").compute_value(down) == 0.0
     assert _through("BELOW").compute_value(down) < 0
     assert _through("BELOW").compute_value(up) == 0.0
+
+
+def _pullback(option="ALTO", n=None):
+    from app.strategies.patrones import PercentagePullbackHighsLowsStrategy
+    integers = {EnumParametro.NUMERO_VELAS_PULLBACK: n} if n is not None else None
+    return _strategy(PercentagePullbackHighsLowsStrategy, EnumFiltro.PERCENTAGE_PULLBACK_HIGHS_LOWS,
+                     {EnumParametro.PUNTO_REFERENCIA_PULLBACK: option}, integers)
+
+
+def _pullback_series():
+    old_peak = _candle(0, high=20.0, low=9.0, close=10.0)
+    recent = [_candle(i, high=11.0, low=9.5, close=10.0) for i in range(1, 9)]
+    last = _candle(9, high=10.5, low=9.5, close=9.9)
+    return [old_peak, *recent, last]
+
+
+def test_pullback_measures_from_the_high_of_the_configured_window():
+    data = MarketData(symbol="AAPL", candles=_pullback_series())
+
+    assert round(_pullback(n=5).compute_value(data), 2) == 10.0
+    assert round(_pullback(n=10).compute_value(data), 2) == 50.5
+
+
+def test_pullback_keeps_five_candles_when_the_parameter_is_missing():
+    data = MarketData(symbol="AAPL", candles=_pullback_series())
+
+    assert _pullback().compute_value(data) == _pullback(n=5).compute_value(data)
+
+
+def test_pullback_needs_the_whole_window():
+    data = MarketData(symbol="AAPL", candles=_pullback_series()[-3:])
+
+    assert _pullback(n=5).compute_value(data) is None
+
+
+def test_pullback_bars_cover_the_configured_window():
+    filtro = Filtro(enumFiltro=EnumFiltro.PERCENTAGE_PULLBACK_HIGHS_LOWS, parametros=[
+        Parametro(enumParametro=EnumParametro.NUMERO_VELAS_PULLBACK, objValorSeleccionado=ValorInteger(valor=30))])
+
+    assert bars_requeridas_filtro(filtro, 1) == 30

@@ -9,13 +9,15 @@ from app.orchestrator.process_registry import ProcessRegistry
 
 logger = logging.getLogger(__name__)
 
-Handler = Callable[[ProcessRegistry, Escaner | ScannerStoppedPayload], None]
+Handler = Callable[..., None]
 
 
 class Dispatcher:
 
-    def __init__(self, registry: ProcessRegistry):
+    def __init__(self, registry: ProcessRegistry, fundamentals_cache=None, snapshot_cache=None):
         self._registry = registry
+        self._fundamentals_cache = fundamentals_cache
+        self._snapshot_cache = snapshot_cache
         self._routes: dict[str, Handler] = {
             EventType.SCANNER_STARTED: handle_scanner_started,
             EventType.SCANNER_STOPPED: handle_scanner_stopped,
@@ -27,7 +29,10 @@ class Dispatcher:
             logger.warning("Dispatcher: unknown event type '%s'", message.type)
             return
         payload = self._parse_payload(message)
-        handler(self._registry, payload)
+        if message.type == EventType.SCANNER_STARTED:
+            handler(self._registry, payload, self._fundamentals_cache, self._snapshot_cache)
+        else:
+            handler(self._registry, payload)
 
     def _parse_payload(self, message: TunnelMessage) -> Escaner | ScannerStoppedPayload:
         if message.type == EventType.SCANNER_STARTED:

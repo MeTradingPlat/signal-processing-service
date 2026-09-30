@@ -9,7 +9,7 @@ from app.scanner.runner import run_scanner
 logger = logging.getLogger(__name__)
 
 
-def handle_scanner_started(registry: ProcessRegistry, payload: Escaner):
+def handle_scanner_started(registry: ProcessRegistry, payload: Escaner, fundamentals_cache=None, snapshot_cache=None):
     existing = registry.pop(payload.idEscaner)
     if existing is not None:
         logger.warning(
@@ -20,7 +20,7 @@ def handle_scanner_started(registry: ProcessRegistry, payload: Escaner):
         if existing.is_alive():
             terminate_and_reap(existing, timeout=3)
 
-    process = Process(target=run_scanner, args=(payload,), daemon=True)
+    process = Process(target=run_scanner, args=(payload, fundamentals_cache, snapshot_cache), daemon=True)
     process.start()
     registry.add(payload.idEscaner, process)
     logger.info(

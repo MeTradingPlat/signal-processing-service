@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 _POLL_SECONDS = 0.5
 
 
-def run_orchestrator(connection: Connection):
+def run_orchestrator(connection: Connection, fundamentals_cache=None, snapshot_cache=None):
     receiver = PipeReceiver(connection)
     registry = ProcessRegistry()
-    dispatcher = Dispatcher(registry)
+    dispatcher = Dispatcher(registry, fundamentals_cache, snapshot_cache)
 
-    _sync_active_scanners(registry)
+    _sync_active_scanners(registry, fundamentals_cache, snapshot_cache)
 
     logger.info("Orchestrator: waiting for events on pipe")
 
@@ -48,7 +48,7 @@ def run_orchestrator(connection: Connection):
         logger.info("Orchestrator: stopped")
 
 
-def _sync_active_scanners(registry: ProcessRegistry):
+def _sync_active_scanners(registry: ProcessRegistry, fundamentals_cache=None, snapshot_cache=None):
     from multiprocessing import Process
     from app.adapters.scanner_management_client import ScannerManagementClient
     from app.scanner.runner import run_scanner
@@ -56,7 +56,7 @@ def _sync_active_scanners(registry: ProcessRegistry):
     client = ScannerManagementClient()
     active = client.get_active_scanners()
     for escaner in active:
-        process = Process(target=run_scanner, args=(escaner,), daemon=True)
+        process = Process(target=run_scanner, args=(escaner, fundamentals_cache, snapshot_cache), daemon=True)
         process.start()
         registry.add(escaner.idEscaner, process)
         logger.info("Sync: restored scanner id=%d name='%s' pid=%d",

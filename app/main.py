@@ -3,12 +3,13 @@ import signal
 import sys
 import threading
 import time
-from multiprocessing import Pipe, Process
+from multiprocessing import Manager, Pipe, Process
 
 import uvicorn
 
 from app.api.server import create_app
 from app.config import settings
+from app.marketfeed.service import run_market_feed
 from app.orchestrator.process_termination import terminate_and_reap
 from app.orchestrator.runtime import run_orchestrator
 
@@ -59,6 +60,32 @@ def _monitor_orchestrator(process_holder: list, child_conn, spawn=_spawn_orchest
         logger.info("Launcher: orchestrator restarted pid=%d", new_process.pid)
 
 
+def _spawn_market_feed(fundamentals_cache, snapshot_cache) -> Process:
+    process = Process(
+        target=run_market_feed, args=(fundamentals_cache, snapshot_cache), name="market-feed", daemon=True,
+    )
+    process.start()
+    return process
+
+
+def _monitor_market_feed(process_holder: list, fundamentals_cache, snapshot_cache,
+                         restart_delay: float | None = None, stop: threading.Event | None = None):
+    """Mismo patron que _monitor_orchestrator (reinicia si muere), pero
+    separado en vez de generalizar: spawn() de cada uno necesita argumentos
+    distintos (child_conn vs las dos caches) y _monitor_orchestrator ya
+    tiene tests propios atados a su firma actual."""
+    delay = _RESTART_DELAY if restart_delay is None else restart_delay
+    while stop is None or not stop.is_set():
+        process_holder[0].join()
+        if stop is not None and stop.is_set():
+            return
+        logger.error("Launcher: market-feed died pid=%d exitcode=%s, restarting in %.0fs",
+                     process_holder[0].pid, process_holder[0].exitcode, delay)
+        time.sleep(delay)
+        process_holder[0] = _spawn_market_feed(fundamentals_cache, snapshot_cache)
+        logger.info("Launcher: market-feed restarted pid=%d", process_holder[0].pid)
+
+
 def main():
     _setup_logging()
 
@@ -66,11 +93,31 @@ def main():
     logger.info("Launcher: waiting for scanner-management and marketdata to be reachable...")
     wait_for_dependencies()
 
+    # fundamentals_cache/snapshot_cache: memoria compartida entre TODOS los
+    # procesos (orquestador, cada escaner, y este mismo) -- un solo feed
+    # mantiene el universo completo al dia (ver run_market_feed), cada
+    # escaner solo LEE de aca en vez de pedir lo mismo por REST (Fase 2 del
+    # rediseño por eventos). manager.dict() es un proxy picklable: se puede
+    # pasar como argumento a Process() igual que cualquier otro valor.
+    manager = Manager()
+    fundamentals_cache = manager.dict()
+    snapshot_cache = manager.dict()
+
+    market_feed_process = _spawn_market_feed(fundamentals_cache, snapshot_cache)
+    logger.info("Launcher: market-feed spawned pid=%d", market_feed_process.pid)
+    market_feed_holder = [market_feed_process]
+    market_feed_monitor = threading.Thread(
+        target=_monitor_market_feed,
+        args=(market_feed_holder, fundamentals_cache, snapshot_cache),
+        daemon=True,
+    )
+    market_feed_monitor.start()
+
     parent_conn, child_conn = Pipe()
 
     orchestrator_process = Process(
         target=run_orchestrator,
-        args=(child_conn,),
+        args=(child_conn, fundamentals_cache, snapshot_cache),
         name="orchestrator",
     )
     orchestrator_process.start()
@@ -87,6 +134,7 @@ def main():
     def _shutdown(signum, frame):
         logger.info("Launcher: received signal %d, shutting down", signum)
         terminate_and_reap(process_holder[0], timeout=5)
+        terminate_and_reap(market_feed_holder[0], timeout=5)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)

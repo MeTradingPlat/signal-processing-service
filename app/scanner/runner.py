@@ -77,9 +77,9 @@ def _next_cycle_delay(pipeline: SymbolPipeline, now: datetime) -> float:
     return seconds_to_close + _BAR_CLOSE_BUFFER_SECONDS
 
 
-def run_scanner(escaner: Escaner):
+def run_scanner(escaner: Escaner, fundamentals_cache=None, snapshot_cache=None):
     orchestrator_pid = os.getppid()
-    pipeline = SymbolPipeline(escaner)
+    pipeline = SymbolPipeline(escaner, fundamentals_cache=fundamentals_cache, snapshot_cache=snapshot_cache)
     watcher = _build_realtime_watcher(escaner, pipeline)
 
     logger.info(

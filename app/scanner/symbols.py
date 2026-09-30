@@ -76,7 +76,16 @@ class SymbolPipeline:
         escaner: Escaner,
         marketdata_client: Optional[MarketdataClient] = None,
         log_service_client: Optional[LogServiceClient] = None,
+        fundamentals_cache=None,
+        snapshot_cache=None,
     ):
+        # fundamentals_cache/snapshot_cache: memoria compartida (un solo
+        # feed para TODO el universo, ver app/marketfeed/service.py) -- si
+        # vienen, _fetch_fundamentals/_aplicar_dinamicos leen de aca en vez
+        # de REST (Fase 2 del rediseño por eventos). None (default, y todos
+        # los tests existentes) preserva el camino REST de siempre.
+        self._fundamentals_cache = fundamentals_cache
+        self._snapshot_cache = snapshot_cache
         self.scanner_id = escaner.idEscaner
         self.permitir_multiples_senales = escaner.permitirMultiplesSenales
         self.mercados = [m.enumMercado.value for m in escaner.mercados]
@@ -142,6 +151,9 @@ class SymbolPipeline:
     def _fetch_fundamentals(self):
         if not self._todos:
             return
+        if self._fundamentals_cache is not None:
+            self._fetch_fundamentals_from_cache()
+            return
         try:
             self._fundamentals = self._client.fetch_fundamentals(self._todos)
             no_data = sum(
@@ -154,6 +166,23 @@ class SymbolPipeline:
             )
         except Exception as e:
             logger.error("SymbolPipeline: fundamentals fetch failed: %s", e)
+
+    def _fetch_fundamentals_from_cache(self):
+        # dict(proxy) trae TODO el contenido remoto en una sola llamada --
+        # un .get()/`in` por simbolo en un bucle de miles de simbolos serian
+        # miles de idas y vueltas al proceso del Manager (cada acceso a un
+        # DictProxy es una llamada entre procesos, no una lectura de memoria
+        # local).
+        try:
+            raw = dict(self._fundamentals_cache)
+        except Exception as e:
+            logger.error("SymbolPipeline: reading shared fundamentals cache failed: %s", e)
+            return
+        self._fundamentals = {sym: FundamentalResponse(**raw[sym]) for sym in self._todos if sym in raw}
+        logger.info(
+            "SymbolPipeline: loaded fundamentals for %d/%d symbols from shared cache",
+            len(self._fundamentals), len(self._todos),
+        )
 
     def aplicar_pre_filtros(self):
         self._fetch_fundamentals()
@@ -188,6 +217,9 @@ class SymbolPipeline:
 
     def _aplicar_dinamicos(self):
         if not self.pre_dinamicos:
+            return
+        if self._snapshot_cache is not None:
+            self._aplicar_dinamicos_from_cache()
             return
         try:
             prices = self._client.fetch_current_prices(self._filtrados)
@@ -226,6 +258,43 @@ class SymbolPipeline:
         self._filtrados = remaining
         self._ultimo_filtrado = list(remaining)
         logger.info("SymbolPipeline: dynamic filters %d -> %d symbols", len(prices), len(self._filtrados))
+
+    def _aplicar_dinamicos_from_cache(self):
+        # Mismo mapeo de campos que el camino REST de arriba: el snapshot
+        # compartido solo aporta el precio en vivo (currentPrice), volumen/
+        # OHLC siguen viniendo de self._fundamentals (ya cargado por
+        # _fetch_fundamentals_from_cache) -- evita mezclar el snapshot crudo
+        # (0 no distingue "sin dato" de un valor real ahi) con el ya
+        # enriquecido de fundamentals (None SI distingue eso, ver
+        # dto.FundamentalRealtime en marketdata-service).
+        try:
+            raw_snapshots = dict(self._snapshot_cache)
+        except Exception as e:
+            logger.error("SymbolPipeline: reading shared snapshot cache failed: %s", e)
+            self._filtrados = list(self._ultimo_filtrado)
+            return
+        remaining = []
+        for sym in self._filtrados:
+            snap = raw_snapshots.get(sym)
+            price = snap.get("currentPrice") if snap else None
+            if price is None:
+                continue
+            fund = self._fundamentals.get(sym)
+            snapshot = PriceSnapshot(
+                symbol=sym, last=price,
+                volume=fund.dayVolume if fund else None,
+                open=fund.open if fund else None,
+                high=fund.high if fund else None,
+                low=fund.low if fund else None,
+                prevClose=fund.prevClose if fund else None,
+            )
+            data = _make_marketdata(sym, fund, None, snapshot)
+            resultados = [get_strategy(f).evaluate(data) for f in self.pre_dinamicos]
+            if _todos_los_requeridos_pasan(self.pre_dinamicos, resultados):
+                remaining.append(sym)
+        self._filtrados = remaining
+        self._ultimo_filtrado = list(remaining)
+        logger.info("SymbolPipeline: dynamic filters (shared cache) -> %d symbols", len(self._filtrados))
 
     def _excluir_ya_senializados_hoy(self):
         """Consulta al log-service los simbolos que ya tuvieron senal hoy para

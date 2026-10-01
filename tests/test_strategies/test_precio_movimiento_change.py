@@ -3,7 +3,7 @@ from app.models.filtro import Filtro, Parametro
 from app.models.valor import ValorString
 from app.scanner.marketdata_models import FundamentalResponse, PriceSnapshot
 from app.strategies.base import MarketData
-from app.strategies.precio_movimiento import ChangeStrategy, GapFromCloseStrategy
+from app.strategies.precio_movimiento import ChangeStrategy, GapFromCloseStrategy, PositionInRangeStrategy
 
 
 def _filtro(punto_referencia: str) -> Filtro:
@@ -73,3 +73,24 @@ def test_gap_from_close_prefers_regular_open_once_available():
     data = MarketData(symbol="AAPL", snapshot=snapshot, fundamental=fund)
     value = GapFromCloseStrategy(_gap_filtro()).compute_value(data)
     assert value == 5.0
+
+
+def _position_filtro() -> Filtro:
+    return Filtro(enumFiltro=EnumFiltro.POSITION_IN_RANGE, parametros=[])
+
+
+def test_position_in_range_degenerate_range_returns_none_not_fifty():
+    # Rango del dia degenerado (recien abrio, o un simbolo de una sola vela):
+    # high==low no tiene rango real que medir -- 50.0 se leia como "precio
+    # exacto a mitad del rango" y pasaba cualquier filtro ENTRE 40-60 sin
+    # fundamento (mismo bug ya corregido en HighLowOfDayStrategy).
+    snapshot = PriceSnapshot(symbol="AAPL", last=100.0, high=100.0, low=100.0)
+    data = MarketData(symbol="AAPL", snapshot=snapshot)
+    assert PositionInRangeStrategy(_position_filtro()).compute_value(data) is None
+
+
+def test_position_in_range_normal_range_still_computes():
+    snapshot = PriceSnapshot(symbol="AAPL", last=327.74, high=329.60, low=322.22)
+    data = MarketData(symbol="AAPL", snapshot=snapshot)
+    value = PositionInRangeStrategy(_position_filtro()).compute_value(data)
+    assert abs(value - ((327.74 - 322.22) / (329.60 - 322.22) * 100.0)) < 1e-9

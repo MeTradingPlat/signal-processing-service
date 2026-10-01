@@ -100,7 +100,11 @@ class PositionInRangeStrategy(FilterStrategy):
         if not q or q.high is None or q.low is None:
             return None
         if q.high <= q.low:
-            return 50.0
+            # Rango degenerado (recien abrio el dia, o un simbolo con una
+            # sola vela): 50.0 se leia como "precio exacto a mitad del
+            # rango" y pasaba cualquier filtro ENTRE 40-60 sin que hubiera
+            # rango real que medir -- mismo fix que HighLowOfDayStrategy.
+            return None
         price = q.last if q.last is not None else q.close
         if price is None:
             return None

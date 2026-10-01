@@ -1,13 +1,24 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from app.analysis.indicators import near_zone, swing_range, zonas_cercanas
+from app.analysis.indicators import calculate_vwap, near_zone, swing_range, todays_candles, zonas_cercanas
 from app.scanner.marketdata_models import CandleResponse
 
 _TODAY = datetime.now(timezone.utc)
+_ET = ZoneInfo("America/New_York")
 
 
 def _candle(high, low) -> CandleResponse:
     return CandleResponse(symbol="AAPL", timestamp=_TODAY, open=low, high=high, low=low, close=high)
+
+
+def _candle_at(et_hour: int, et_minute: int, price: float, volume: float) -> CandleResponse:
+    now_et = datetime.now(_ET)
+    ts = now_et.replace(hour=et_hour, minute=et_minute, second=0, microsecond=0)
+    return CandleResponse(
+        symbol="AAPL", timestamp=ts.astimezone(timezone.utc),
+        open=price, high=price, low=price, close=price, volume=volume,
+    )
 
 
 def test_swing_range_moves_after_confirmed_breakout():
@@ -55,3 +66,25 @@ def test_zonas_cercanas_overlapping():
 def test_zonas_cercanas_far_apart():
     candles = [_candle(101, 99) for _ in range(5)]
     assert zonas_cercanas((10.0, 11.0), (100.0, 101.0), candles) is False
+
+
+def test_calculate_vwap_excludes_pre_market_volume():
+    # VWAP institucional resetea en la apertura regular (9:30 ET) -- una
+    # vela de pre-market no debe entrar en la suma acumulada.
+    pre_market = _candle_at(8, 0, 50.0, 1000)
+    regular = _candle_at(10, 0, 100.0, 500)
+    assert calculate_vwap([pre_market, regular]) == 100.0
+
+
+def test_todays_candles_excludes_late_utc_candle_from_yesterday_et_evening():
+    # Vela de ayer a las 10pm ET (post-market) cae en la madrugada UTC de
+    # HOY -- comparar por fecha calendario UTC (el bug viejo) la contaba
+    # como "hoy" por error; la fecha calendario en ET la excluye bien.
+    now_et = datetime.now(_ET)
+    yesterday_evening = (now_et - timedelta(days=1)).replace(hour=22, minute=0, second=0, microsecond=0)
+    stale = CandleResponse(
+        symbol="AAPL", timestamp=yesterday_evening.astimezone(timezone.utc),
+        open=1, high=1, low=1, close=1, volume=100,
+    )
+    today_candle = _candle_at(10, 0, 100.0, 500)
+    assert todays_candles([stale, today_candle]) == [today_candle]

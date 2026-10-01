@@ -1,6 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app.scanner.marketdata_models import CandleResponse
+from app.scanner.session_clock import today_et
+
+_ET = ZoneInfo("America/New_York")
 
 
 def calculate_ema(values: list[float], period: int) -> float:
@@ -95,7 +99,10 @@ def calculate_rsi(candles: list[CandleResponse], period: int) -> float | None:
 
 
 def calculate_vwap(candles: list[CandleResponse]) -> float | None:
-    """VWAP: Σ(TypicalPrice × Volume) / Σ(Volume). Resets daily (only today's candles).
+    """VWAP: Σ(TypicalPrice × Volume) / Σ(Volume). Resetea en la apertura
+    regular (9:30 ET), como el estandar institucional -- cortar por fecha
+    calendario UTC mezclaba sesiones (medianoche UTC cae a las 7-8pm ET, en
+    pleno post-market) y sumaba volumen de pre-market que no corresponde.
     Bars missing high/low/close/volume are skipped rather than aborting the whole
     calculation, since this is a plain weighted sum, not an order-dependent series."""
     if not candles:
@@ -111,25 +118,31 @@ def calculate_vwap(candles: list[CandleResponse]) -> float | None:
             tp += c.volume
         return tv, tp
 
-    today = datetime.now(timezone.utc).date()
-    todays = [c for c in candles if c.timestamp and c.timestamp.date() == today]
+    today = today_et()
+    session_open = datetime(today.year, today.month, today.day, 9, 30, tzinfo=_ET)
+    regular_session = [
+        c for c in candles
+        if c.timestamp and c.timestamp.astimezone(_ET).date() == today
+        and c.timestamp.astimezone(_ET) >= session_open
+    ]
 
-    tv, tp = _accumulate(todays)
+    tv, tp = _accumulate(regular_session)
     if tp <= 0:
-        fallback = todays if todays else candles[-max(1, len(candles) // 10):]
+        fallback = regular_session if regular_session else candles[-max(1, len(candles) // 10):]
         tv, tp = _accumulate(fallback)
     return tv / tp if tp > 0 else None
 
 
 def todays_candles(candles: list[CandleResponse] | None) -> list[CandleResponse]:
-    """Isola las velas de la sesion de hoy -- varias estrategias de patrones
-    usaban candles[0]/candles[-1] asumiendo que la ventana pedida arrancaba
-    en la apertura del dia, pero es solo "las ultimas N barras", que puede
-    arrancar en cualquier punto (incluso un dia anterior)."""
+    """Isola las velas de la sesion de hoy (fecha calendario en ET, no UTC --
+    medianoche UTC cae a mitad del post-market) -- varias estrategias de
+    patrones usaban candles[0]/candles[-1] asumiendo que la ventana pedida
+    arrancaba en la apertura del dia, pero es solo "las ultimas N barras",
+    que puede arrancar en cualquier punto (incluso un dia anterior)."""
     if not candles:
         return []
-    today = datetime.now(timezone.utc).date()
-    return [c for c in candles if c.timestamp and c.timestamp.date() == today]
+    today = today_et()
+    return [c for c in candles if c.timestamp and c.timestamp.astimezone(_ET).date() == today]
 
 
 def volumes_or_zero(candles: list[CandleResponse]) -> list[float]:

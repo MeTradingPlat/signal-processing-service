@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from app.models.enums import EnumCondicional, EnumFiltro, EnumParametro, EnumTipoValor
 from app.models.filtro import Filtro, Parametro
-from app.models.valor import ValorCondicional
+from app.models.valor import ValorCondicional, ValorInteger
 from app.scanner.marketdata_models import CandleResponse
 from app.strategies.base import MarketData
 from app.strategies.volumen.average_volume import AverageVolumeStrategy
@@ -30,6 +30,28 @@ def test_average_volume_below_threshold():
     strategy = AverageVolumeStrategy(filtro)
     data = MarketData(symbol="AAPL", candles=[_candle(10000), _candle(20000), _candle(30000)])
     assert strategy.evaluate(data)
+
+
+def test_average_volume_uses_only_the_last_n_candles():
+    # 25 velas: las primeras 5 (fuera de la ventana default de 20) tienen
+    # volumen altisimo -- si entraran al promedio, lo dispararian.
+    data = MarketData(symbol="AAPL", candles=[_candle(999999)] * 5 + [_candle(100)] * 20)
+    strategy = AverageVolumeStrategy(Filtro(enumFiltro=EnumFiltro.AVERAGE_VOLUME, parametros=[]))
+    assert strategy.compute_value(data) == 100.0
+
+
+def test_numero_velas_parameter_overrides_the_default_window():
+    data = MarketData(symbol="AAPL", candles=[_candle(999999)] * 5 + [_candle(100)] * 20)
+    filtro = Filtro(
+        enumFiltro=EnumFiltro.AVERAGE_VOLUME,
+        parametros=[Parametro(
+            enumParametro=EnumParametro.NUMERO_VELAS_AVERAGE_VOLUME, etiqueta="",
+            objValorSeleccionado=ValorInteger(valor=25),
+        )],
+    )
+    strategy = AverageVolumeStrategy(filtro)
+    expected = (999999 * 5 + 100 * 20) / 25
+    assert abs(strategy.compute_value(data) - expected) < 1e-6
 
 
 def test_average_volume_counts_zero_volume_candles_instead_of_dropping_them():

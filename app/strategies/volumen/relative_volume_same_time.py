@@ -1,11 +1,11 @@
+from app.models.enums import EnumParametro
 from app.strategies.base import FilterStrategy, MarketData
-
-_DIAS_COMPARACION = 5
 
 
 class RelativeVolumeSameTimeStrategy(FilterStrategy):
     """Volumen actual vs. promedio de volumen en esa MISMA franja horaria en
-    los _DIAS_COMPARACION dias anteriores -- a diferencia de RELATIVE_VOLUME
+    los ultimos N dias (NUMERO_DIAS_RELATIVE_VOLUME_SAME_TIME, default 10,
+    el estandar de TradingView) -- a diferencia de RELATIVE_VOLUME
     (que promedia TODAS las barras previas de la ventana sin importar la
     hora del dia), este filtro busca, para cada uno de los ultimos dias,
     la vela cuyo HH:MM coincide exactamente con la vela actual (las velas
@@ -39,6 +39,7 @@ class RelativeVolumeSameTimeStrategy(FilterStrategy):
             return None
         today = current.timestamp.date()
         target_hm = (current.timestamp.hour, current.timestamp.minute)
+        dias_comparacion = self._param_int(EnumParametro.NUMERO_DIAS_RELATIVE_VOLUME_SAME_TIME, 10)
 
         same_time_volumes = []
         seen_days = set()
@@ -51,7 +52,7 @@ class RelativeVolumeSameTimeStrategy(FilterStrategy):
             if (c.timestamp.hour, c.timestamp.minute) == target_hm:
                 same_time_volumes.append(c.volume)
                 seen_days.add(day)
-                if len(seen_days) >= _DIAS_COMPARACION:
+                if len(seen_days) >= dias_comparacion:
                     break
 
         if not same_time_volumes:

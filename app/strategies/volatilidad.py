@@ -39,7 +39,8 @@ class RelativeRangeStrategy(FilterStrategy):
         if current.high is None or current.low is None:
             return None
         c_range = current.high - current.low
-        atr = calculate_atr(data.candles, 14)
+        period = self._param_int(EnumParametro.PERIODO_ATR_RELATIVE_RANGE, 14)
+        atr = calculate_atr(data.candles, period)
         if atr is None or atr <= 0:
             return None
         return (c_range / atr) * 100.0

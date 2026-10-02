@@ -30,12 +30,8 @@ class PriceSnapshot(BaseModel):
     open: Optional[float] = None
     high: Optional[float] = None
     low: Optional[float] = None
-    close: Optional[float] = None
     prevClose: Optional[float] = None
     volume: Optional[float] = None
-    tradingHalted: Optional[bool] = None
-    tradingHaltedReason: Optional[str] = None
-    beta: Optional[float] = None
 
 
 class EarningsResponse(BaseModel):

@@ -70,7 +70,6 @@ AAPL_FUND = _make_fund(
 AAPL_SNAPSHOT = _make_snapshot(
     last=327.74, open=323.13,
     high=329.60, low=322.22, prevClose=326.59, volume=41_349_908,
-    tradingHalted=False,
 )
 
 

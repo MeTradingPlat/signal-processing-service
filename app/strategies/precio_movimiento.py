@@ -105,9 +105,9 @@ class PositionInRangeStrategy(FilterStrategy):
             # rango" y pasaba cualquier filtro ENTRE 40-60 sin que hubiera
             # rango real que medir -- mismo fix que HighLowOfDayStrategy.
             return None
-        price = q.last if q.last is not None else q.close
-        if price is None:
+        if q.last is None:
             return None
+        price = q.last
         return ((price - q.low) / (q.high - q.low)) * 100.0
 
 
@@ -183,11 +183,12 @@ class CrossingAboveBelowStrategy(FilterStrategy):
 
 
 class HaltStrategy(FilterStrategy):
-    """Whether trading is halted."""
+    """Whether trading is halted -- unico dato real es
+    fundamental.tradingStatus (refrescado por marketdata-service cada 15 min
+    en horario de mercado via /market-data/by-type is-trading-halted). No
+    existe ningun flag de halt en tiempo real via snapshot/WS todavia."""
 
     def compute_value(self, data: MarketData) -> float:
-        if data.snapshot and data.snapshot.tradingHalted:
-            return 1.0
         if data.fundamental and data.fundamental.tradingStatus:
             status = data.fundamental.tradingStatus
             if status.upper() not in ("ACTIVE", ""):
